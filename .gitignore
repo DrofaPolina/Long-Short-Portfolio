@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+.env
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Outputs (optional: remove if you want to track outputs/)
+outputs/
+
+# Data folder and temp files
+DATA/
+data/
+temp_*.xlsx
+
+# Internal notes (not for repo)
+REDUNDANT_OR_STANDALONE.md
+
+# Local data / IDE
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Conda / env (local)
+.conda/
