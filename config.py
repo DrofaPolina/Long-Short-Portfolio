@@ -152,8 +152,15 @@ OUTPUT_DIRS = {
     'factors': 'outputs/factors',
     'portfolio': 'outputs/portfolio',
     'weights': 'outputs/weights',
-    'analysis': 'outputs/analysis'
+    'analysis': 'outputs/analysis',
+    'performance': 'outputs/performance_2026',
+    'hrp_weights': 'outputs/hrp_weights',
 }
+
+# Performance automation: workbook with EU DATA / US DATA / EU PORTFOLIO / US PORTFOLIO / TOTAL DAILY
+PERFORMANCE_WORKBOOK_FILENAME = 'Performance_SPRING_2026.xlsx'
+# Total notional (long + short). Sheet uses half per leg; e.g. 5000 → 2500 per side (match row-162 sums in sheet).
+PERFORMANCE_TOTAL_AMOUNT = 5000
 
 # Save intermediate results
 SAVE_FACTOR_SCORES = True   # Save stock-level factor scores

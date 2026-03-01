@@ -21,6 +21,8 @@ outputs/
 # Data folder and temp files
 DATA/
 data/
+DATA FOLDER*
+*.zip
 temp_*.xlsx
 
 # Internal notes (not for repo)
