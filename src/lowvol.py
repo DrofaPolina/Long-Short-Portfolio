@@ -17,8 +17,12 @@ import numpy as np
 import pandas as pd
 import sys
 import os
+from pathlib import Path
 
 sys.path.append('src')
+
+# Default: write to project root outputs/factors (same regardless of cwd)
+_DEFAULT_FACTOR_OUTPUT = str(Path(__file__).resolve().parent.parent / "outputs" / "factors")
 from data_loader import load_stock_returns_us, load_stock_returns_eu
 
 
@@ -97,7 +101,7 @@ def calculate_lowvol_factor(returns, volatility, long_short_pct=0.10, min_start_
 
 
 def calculate_lowvol_factor_monthly(us_returns, eu_returns, vol_window=60, 
-                                     save_outputs=True, output_dir='outputs/factors'):
+                                     save_outputs=True, output_dir=None):
     """
     Main function to calculate low volatility factor.
     
@@ -111,6 +115,8 @@ def calculate_lowvol_factor_monthly(us_returns, eu_returns, vol_window=60,
     Returns:
         dict with 'US', 'EU', 'combined' factor returns
     """
+    if output_dir is None:
+        output_dir = _DEFAULT_FACTOR_OUTPUT
     print("=" * 60)
     print("LOW VOLATILITY FACTOR CALCULATION")
     print("=" * 60)

@@ -23,8 +23,12 @@ import numpy as np
 import pandas as pd
 import sys
 import os
+from pathlib import Path
 
 sys.path.append('src')
+
+# Default: write to project root outputs/factors (same regardless of cwd)
+_DEFAULT_FACTOR_OUTPUT = str(Path(__file__).resolve().parent.parent / "outputs" / "factors")
 
 
 def _to_num(x):
@@ -274,7 +278,7 @@ def calculate_value_returns(returns, active):
     return (long_ret - short_ret)
 
 
-def calculate_value_factor_monthly(save_outputs=True, output_dir='outputs/factors'):
+def calculate_value_factor_monthly(save_outputs=True, output_dir=None):
     """
     Main function to calculate value factor.
     
@@ -285,6 +289,8 @@ def calculate_value_factor_monthly(save_outputs=True, output_dir='outputs/factor
     Returns:
         dict with 'US', 'EU', 'combined' value factor returns
     """
+    if output_dir is None:
+        output_dir = _DEFAULT_FACTOR_OUTPUT
     print("=" * 60)
     print("VALUE FACTOR CALCULATION (Book-to-Market)")
     print("=" * 60)
@@ -374,7 +380,7 @@ if __name__ == '__main__':
     # Can run directly: python value.py
     results = calculate_value_factor_monthly(
         save_outputs=True,
-        output_dir='outputs/factors'
+        output_dir=_DEFAULT_FACTOR_OUTPUT
     )
     
     print("\n✓ Value factor ready!")

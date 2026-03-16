@@ -18,6 +18,10 @@ import pandas as pd
 import statsmodels.api as sm
 import sys
 import os
+from pathlib import Path
+
+# Default: write to project root outputs/factors (same regardless of cwd)
+_DEFAULT_FACTOR_OUTPUT = str(Path(__file__).resolve().parent.parent / "outputs" / "factors")
 
 
 def nelson_siegel_design_matrix(t, lb=1.5):
@@ -148,7 +152,7 @@ def load_yield_curves():
     return rates_us, rates_eu
 
 
-def calculate_yield_factors_monthly(save_outputs=True, output_dir='outputs/factors'):
+def calculate_yield_factors_monthly(save_outputs=True, output_dir=None):
     """
     Main function to calculate yield curve factors.
     
@@ -159,6 +163,8 @@ def calculate_yield_factors_monthly(save_outputs=True, output_dir='outputs/facto
     Returns:
         dict with 'US', 'EU', 'combined' yield factors
     """
+    if output_dir is None:
+        output_dir = _DEFAULT_FACTOR_OUTPUT
     print("=" * 60)
     print("YIELD CURVE FACTOR CALCULATION (Nelson-Siegel)")
     print("=" * 60)
@@ -253,7 +259,7 @@ if __name__ == '__main__':
     # Run directly: python yield.py
     results = calculate_yield_factors_monthly(
         save_outputs=True,
-        output_dir='outputs/factors'
+        output_dir=_DEFAULT_FACTOR_OUTPUT
     )
     
     print("\n✓ Yield factors ready!")

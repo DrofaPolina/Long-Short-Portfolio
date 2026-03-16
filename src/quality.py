@@ -15,9 +15,13 @@ import numpy as np
 import pandas as pd
 import sys
 import os
+from pathlib import Path
 
 # Add parent directory to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Default: write to project root outputs/factors (same regardless of cwd)
+_DEFAULT_FACTOR_OUTPUT = str(Path(__file__).resolve().parent.parent / "outputs" / "factors")
 
 from data_loader import (
     load_financial_data_us,
@@ -222,7 +226,7 @@ def calculate_quality_portfolio_returns(quality_score, returns, region_name=""):
     return portfolio_returns
 
 
-def calculate_quality_factor(save_outputs=True, output_dir='outputs/factors'):
+def calculate_quality_factor(save_outputs=True, output_dir=None):
     """
     Main function to calculate quality factor.
     
@@ -238,6 +242,8 @@ def calculate_quality_factor(save_outputs=True, output_dir='outputs/factors'):
             - 'returns': pd.Series - Monthly factor returns
             - 'scores': pd.DataFrame - Stock-level quality scores
     """
+    if output_dir is None:
+        output_dir = _DEFAULT_FACTOR_OUTPUT
     print("=" * 60)
     print("QUALITY FACTOR CALCULATION")
     print("=" * 60)

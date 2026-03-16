@@ -40,7 +40,8 @@ import pandas as pd
 #   - "STOXX600"    : monthly prices for EU universe
 #   - "Dollar Value US" or "Dollar Volume US"
 #   - "Dollar Value EU" or "Dollar Volume EU"
-LIQUIDITY_FILE_PATH = "Minerva_Size_Factor.xlsx"  # <-- SET THIS TO YOUR FILE
+# Default: data/Minerva_Size_Factor.xlsx (override or pass file_path to calculate_liquidity_factor_monthly)
+LIQUIDITY_FILE_PATH = str(Path(__file__).resolve().parent.parent / "data" / "Minerva_Size_Factor.xlsx")
 
 # Minimum non‑null months of data for both prices and dollar value
 MIN_MONTHS = 24
@@ -487,13 +488,16 @@ def _run_illiq_pipeline_for_dataset(
 
 
 # =============================================================================
+# Default: write to project root outputs/factors (same regardless of cwd)
+_DEFAULT_FACTOR_OUTPUT = str(Path(__file__).resolve().parent.parent / "outputs" / "factors")
+
 # PUBLIC ENTRY POINT (like other factor scripts)
 # =============================================================================
 
 def calculate_liquidity_factor_monthly(
     file_path: str = None,
     save_outputs: bool = True,
-    output_dir: str = "outputs/factors",
+    output_dir: str = None,
 ) -> dict:
     """
     Main function to calculate liquidity factor (Amihud illiquidity).
@@ -519,6 +523,8 @@ def calculate_liquidity_factor_monthly(
           'combined': pd.DataFrame with columns ['LIQ_US', 'LIQ_EU', 'LIQ']
         }
     """
+    if output_dir is None:
+        output_dir = _DEFAULT_FACTOR_OUTPUT
     print("=" * 60)
     print("LIQUIDITY FACTOR CALCULATION (Amihud 10–1)")
     print("=" * 60)
@@ -600,6 +606,6 @@ if __name__ == "__main__":
     _ = calculate_liquidity_factor_monthly(
         file_path=LIQUIDITY_FILE_PATH,
         save_outputs=True,
-        output_dir="outputs/factors",
+        output_dir=_DEFAULT_FACTOR_OUTPUT,
     )
 

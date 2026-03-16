@@ -1,8 +1,8 @@
 """
 US Portfolio performance (AR–AX columns) from weights and prices.
 
-Replicates the logic of the "US PORTFOLIO" sheet in Copy of Performance_END_2025 .xlsx:
-- Weights: row 8 (B:U long, X:AQ short); can be overwritten by HRP output.
+Replicates the logic of the "US PORTFOLIO" sheet in the performance workbook (default: Performance_SPRING_2026.xlsx):
+- Weights: row 8 (B:U long, X:AQ short); tickers row 10.
 - Prices: from "US DATA" sheet (same workbook) or from a separate price file.
 - Output: AR (long value), AU (short value), AS, AT, AV, AW, AX (daily changes and combined PnL).
 
@@ -24,10 +24,11 @@ import numpy as np
 import pandas as pd
 
 
-# Default paths (project root = parent of this script if run from repo)
-PROJECT_ROOT = Path(__file__).resolve().parent
-DEFAULT_XLSX = PROJECT_ROOT / "Copy of Performance_END_2025 .xlsx"
-OUTPUT_DIR = PROJECT_ROOT / "outputs" / "portfolio_us"
+# Default paths: input from data/, output from config
+import config as _config
+PROJECT_ROOT = _config.PROJECT_ROOT
+DEFAULT_XLSX = _config.get_data_path("Performance_SPRING_2026.xlsx")  # override via CLI or argument
+OUTPUT_DIR = _config.get_output_path("portfolio_us")
 OUTPUT_CSV = OUTPUT_DIR / "us_portfolio_ar_ax.csv"
 OUTPUT_XLSX = OUTPUT_DIR / "us_portfolio_ar_ax.xlsx"
 
@@ -227,36 +228,6 @@ def build_ar_ax(
     return out
 
 
-def _read_weights_df(df: pd.DataFrame) -> tuple[list[float], list[str]]:
-    wcol = "weight" if "weight" in df.columns else "w"
-    tcol = "ticker" if "ticker" in df.columns else df.columns[0]
-    return df[wcol].astype(float).tolist(), df[tcol].astype(str).tolist()
-
-
-def load_weights_from_hrp_csv(
-    long_path: Path,
-    short_path: Optional[Path] = None,
-) -> tuple[list[float], list[str], list[float], list[str]]:
-    """
-    Load weights from HRP-style CSVs.
-    Expected format: one column 'ticker', one column 'weight' (or 'w').
-    If short_path is None, assume single file with a 'side' column (long/short).
-    """
-    if short_path is None:
-        df = pd.read_csv(long_path)
-        if "side" in df.columns:
-            long_df = df[df["side"].str.lower().eq("long")]
-            short_df = df[df["side"].str.lower().eq("short")]
-            wl, tl = _read_weights_df(long_df) if len(long_df) else ([], [])
-            ws, ts = _read_weights_df(short_df) if len(short_df) else ([], [])
-            return (wl, tl, ws, ts)
-        wl, tl = _read_weights_df(df)
-        return (wl, tl, [], [])
-    wl, tl = _read_weights_df(pd.read_csv(long_path))
-    ws, ts = _read_weights_df(pd.read_csv(short_path))
-    return (wl, tl, ws, ts)
-
-
 def main(
     xlsx_path: Optional[Path] = None,
     weights_long: Optional[list[float]] = None,
@@ -264,17 +235,14 @@ def main(
     tickers_long: Optional[list[str]] = None,
     tickers_short: Optional[list[str]] = None,
     prices_path: Optional[Path] = None,
-    hrp_weights_long_path: Optional[Path] = None,
-    hrp_weights_short_path: Optional[Path] = None,
     amount: float = TOTAL_AMOUNT,
     output_csv: Optional[Path] = None,
     output_xlsx: Optional[Path] = None,
 ) -> pd.DataFrame:
     """
     Build AR–AX output. Sources (in order of use):
-    1) If hrp_weights_long_path (and optionally hrp_weights_short_path) set: load weights from HRP CSVs.
-    2) Else if xlsx_path set: load weights and tickers from US PORTFOLIO sheet.
-    3) Else use passed weights_long, weights_short, tickers_long, tickers_short (must all be set).
+    1) If xlsx_path set: load weights and tickers from US PORTFOLIO sheet.
+    2) Else use passed weights_long, weights_short, tickers_long, tickers_short (must all be set).
 
     Prices: from xlsx_path "US DATA" sheet if xlsx_path set and prices_path not set; else from prices_path (CSV/Excel with Date index and ticker columns).
     """
@@ -283,11 +251,7 @@ def main(
     output_xlsx = output_xlsx or OUTPUT_XLSX
     amount_per_side = amount / 2
 
-    if hrp_weights_long_path is not None:
-        wl, tl, ws, ts = load_weights_from_hrp_csv(hrp_weights_long_path, hrp_weights_short_path)
-        if not tl and not ts:
-            raise ValueError("No weights loaded from HRP files.")
-    elif xlsx_path.exists():
+    if xlsx_path.exists():
         wl, tl, ws, ts = load_weights_and_tickers_from_xlsx(xlsx_path)
         if weights_long is not None:
             wl = list(weights_long)
@@ -329,18 +293,14 @@ def main(
 
 if __name__ == "__main__":
     import argparse
-    p = argparse.ArgumentParser(description="Build US portfolio AR–AX from Performance xlsx or HRP weights + prices.")
-    p.add_argument("xlsx", nargs="?", default=None, help="Path to Performance workbook (default: Copy of Performance_END_2025 .xlsx)")
-    p.add_argument("--hrp-long", type=Path, help="CSV of HRP weights (long): columns ticker, weight")
-    p.add_argument("--hrp-short", type=Path, help="CSV of HRP weights (short)")
+    p = argparse.ArgumentParser(description="Build US portfolio AR–AX from Performance xlsx (weights and tickers from US PORTFOLIO sheet).")
+    p.add_argument("xlsx", nargs="?", default=None, help="Path to Performance workbook (default: data/Performance_SPRING_2026.xlsx)")
     p.add_argument("--prices", type=Path, help="CSV or Excel with Date index and ticker columns (default: US DATA sheet)")
     p.add_argument("--output-csv", type=Path, default=None)
     p.add_argument("--output-xlsx", type=Path, default=None)
     args = p.parse_args()
     main(
         xlsx_path=Path(args.xlsx) if args.xlsx else None,
-        hrp_weights_long_path=args.hrp_long,
-        hrp_weights_short_path=args.hrp_short,
         prices_path=args.prices,
         output_csv=args.output_csv,
         output_xlsx=args.output_xlsx,

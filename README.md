@@ -2,6 +2,8 @@
 
 Factor pipeline: Value, Momentum, Liquidity, Quality, Yield (BETA0/BETA1/BETA2), Low Vol. Builds regional (US/EU) and combined factor returns and runs portfolio analysis.
 
+For **project layout, path rules, and improvement ideas** see [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md).
+
 ## Setup
 
 From the project root (folder containing `run_all.py` and `src/`):
@@ -12,9 +14,18 @@ pip install -r requirements.txt
 
 ## Run
 
+- **Check that output paths are correct:**  
+  `python verify_output_paths.py`
+
 - **Full pipeline (no notebooks):**  
   `python run_all.py`  
   Default: combined region. Use `--region us` or `--region eu` for regional outputs.
+
+- **HRP weights:**  
+  `python hrp_allocation.py` → writes `outputs/hrp_weights/hrp_weights.xlsx`
+
+- **US portfolio (AR–AX from performance workbook):**  
+  `python us_portfolio_performance.py [path_to.xlsx]` → `outputs/portfolio_us/`
 
 - **Notebooks (run pipeline + analysis + plots):**  
   Open and run all cells. Run from project root so imports work.
@@ -39,6 +50,7 @@ Minerva Code/
 ├── factor_performance_backtest.ipynb
 ├── data/                  # Put input data here (ignored by git)
 ├── src/                   # Factor modules
+│   ├── temp/              # Cache/temp files from data_loader (ignored by git)
 │   ├── data_loader.py
 │   ├── value.py
 │   ├── momentum.py
@@ -56,7 +68,9 @@ Minerva Code/
 
 - **data/** (or **DATA/**): input files; not committed (in `.gitignore`).
 - **outputs/**: factor outputs and plots; not committed.
-- **temp_*.xlsx**, **REDUNDANT_OR_STANDALONE.md**: also in `.gitignore`.
+- **src/temp/**: cache/temp files from data_loader (e.g. downloaded Excel/CSV from Google); not committed.
+- **REDUNDANT_OR_STANDALONE.md**: also in `.gitignore`.
+- **src/outputs/**: do not use; all outputs go under root `outputs/` (see PROJECT_STRUCTURE.md).
 
 ---
 

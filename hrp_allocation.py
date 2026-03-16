@@ -10,7 +10,6 @@ Data source (only from Google):
 
 Outputs:
   - hrp_weights.xlsx: all four legs (long_eu, long_us, short_eu, short_us) in one workbook
-  - weights_long_us.csv, weights_short_us.csv: for use with us_portfolio_performance.py
 
 Usage:
   python hrp_allocation.py
@@ -31,12 +30,13 @@ from scipy.cluster.hierarchy import linkage, leaves_list
 from scipy.spatial.distance import squareform
 
 
-# Default paths / file IDs (from notebook)
-PROJECT_ROOT = Path(__file__).resolve().parent
-DEFAULT_TICKERS_FILE = PROJECT_ROOT / "Tickers.xlsx"
-DEFAULT_US_RETURNS_FILE = PROJECT_ROOT / "US_Returns.xlsx"
-DEFAULT_EU_RETURNS_FILE = PROJECT_ROOT / "EU_Returns.xlsx"
-DEFAULT_OUT_DIR = PROJECT_ROOT / "outputs" / "hrp_weights"
+# Default paths: data files in data/, outputs from config
+import config as _config
+PROJECT_ROOT = _config.PROJECT_ROOT
+DEFAULT_TICKERS_FILE = _config.get_data_path("Tickers.xlsx")
+DEFAULT_US_RETURNS_FILE = _config.get_data_path("US_Returns.xlsx")
+DEFAULT_EU_RETURNS_FILE = _config.get_data_path("EU_Returns.xlsx")
+DEFAULT_OUT_DIR = _config.get_output_path("hrp_weights")
 TICKERS_DRIVE_ID = "1l6Ms10hLmhAveuuUaWM2JRn1GVVr1wbN"
 EU_RETURNS_DRIVE_ID = "1oy0zrqGXpOW7rM1XQ5WU_9HlX6Spkr8f"
 US_RETURNS_DRIVE_ID = "1jDIZKHsSfAKk61TJauSfhFSnTgx8nZgi"
@@ -256,16 +256,8 @@ def _run_hrp_core(
     with pd.ExcelWriter(out_dir / "hrp_weights.xlsx", engine="openpyxl") as w:
         for leg_name, df in results.items():
             df.to_excel(w, sheet_name=leg_name, index=False)
-    for leg in ("long_us", "short_us"):
-        df = results[leg]
-        if not df.empty:
-            out_name = "weights_long_us.csv" if leg == "long_us" else "weights_short_us.csv"
-            df.rename(columns={"Ticker": "ticker", "Weight": "weight"}).to_csv(
-                out_dir / out_name, index=False
-            )
     print(f"Saved HRP weights to {out_dir}")
     print(f"  hrp_weights.xlsx (sheets: long_eu, short_eu, long_us, short_us)")
-    print(f"  weights_long_us.csv, weights_short_us.csv (for us_portfolio_performance.py)")
     return results
 
 

@@ -4,8 +4,7 @@ Data loading utilities for factor portfolio construction.
 This module provides functions to load data from Google Sheets/Drive.
 Each function loads a specific dataset and returns a clean pandas DataFrame.
 
-Temp/cache files are always written to the project root (parent of src/),
-so they match run_all.py behaviour regardless of current working directory.
+Temp/cache files are written to src/temp/ so all cache paths are in one place.
 """
 
 import os
@@ -13,15 +12,16 @@ from pathlib import Path
 import pandas as pd
 import gdown
 
-# Project root = parent of src/; temp files go here (same as run_all.py cwd)
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
-_CACHE_DIR = _PROJECT_ROOT
+# Temp/cache folder lives inside src/ (src/temp/)
+_SRC_DIR = Path(__file__).resolve().parent
+_CACHE_DIR = _SRC_DIR / "temp"
 
 STOCKS_SHEET_ID = '1oCUB1exeFq3AnxRcBppZNsbOxhBQyiW5'
 
 
 def _cache_path(filename):
-    """Path for a cache/temp file in project root."""
+    """Path for a cache/temp file in the dedicated temp/ folder. Creates temp/ if needed."""
+    _CACHE_DIR.mkdir(parents=True, exist_ok=True)
     return _CACHE_DIR / filename
 
 

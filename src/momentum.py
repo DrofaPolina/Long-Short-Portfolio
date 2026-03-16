@@ -14,8 +14,12 @@ import numpy as np
 import pandas as pd
 import sys
 import os
+from pathlib import Path
 
 sys.path.append('src')
+
+# Default: write to project root outputs/factors (same regardless of cwd)
+_DEFAULT_FACTOR_OUTPUT = str(Path(__file__).resolve().parent.parent / "outputs" / "factors")
 from data_loader import load_stock_returns_us, load_stock_returns_eu
 
 
@@ -99,7 +103,7 @@ def calculate_momentum_factor(returns, momentum_signal, long_short_pct=0.10, min
     return momentum_factor.dropna()
 
 
-def calculate_momentum_factor_monthly(us_returns, eu_returns, save_outputs=True, output_dir='outputs/factors'):
+def calculate_momentum_factor_monthly(us_returns, eu_returns, save_outputs=True, output_dir=None):
     """
     Main function to calculate momentum factor for both US and EU.
     
@@ -112,6 +116,8 @@ def calculate_momentum_factor_monthly(us_returns, eu_returns, save_outputs=True,
     Returns:
         dict with 'US', 'EU', 'combined' factor returns
     """
+    if output_dir is None:
+        output_dir = _DEFAULT_FACTOR_OUTPUT
     print("=" * 60)
     print("MOMENTUM FACTOR CALCULATION (12-1)")
     print("=" * 60)
