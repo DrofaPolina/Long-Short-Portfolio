@@ -17,13 +17,13 @@ build/
 
 # Outputs (optional: remove if you want to track outputs/)
 outputs/
+src/outputs/
 
-# Data folder and temp files
+# Data folder and temp/cache files
 DATA/
 data/
-DATA FOLDER*
 *.zip
-temp_*.xlsx
+temp/
 
 # Internal notes (not for repo)
 REDUNDANT_OR_STANDALONE.md

@@ -2,13 +2,20 @@
 Configuration for Factor Portfolio
 
 This file contains all configurable parameters:
-- Factor weights
-- Quality factor metric weights
-- Optimization parameters
-- Data sources
-
-Modify these settings to test different portfolio configurations.
 """
+
+from pathlib import Path
+
+# Project root (directory containing config.py, run_all.py, src/)
+PROJECT_ROOT = Path(__file__).resolve().parent
+
+# Input data directory (Excel files: Tickers, US_Returns, EU_Returns, Performance_*.xlsx, Minerva_Size_Factor.xlsx)
+DATA_DIR = PROJECT_ROOT / "data"
+
+
+def get_data_path(*parts):
+    """Return path under data/ (e.g. get_data_path('Tickers.xlsx'))."""
+    return DATA_DIR.joinpath(*parts)
 
 # ============================================
 # FACTOR SELECTION
@@ -92,7 +99,7 @@ DEFAULT_WEIGHTS_COMBINED = {
 }
 
 # Alternative: Load weights from HRP optimization
-USE_HRP_WEIGHTS = True  # If True, load from outputs/weights/hrp_weights.xlsx
+USE_HRP_WEIGHTS = True  # If True, load from outputs/hrp_weights/hrp_weights.xlsx (written by hrp_allocation.py)
 
 # ============================================
 # LONG-SHORT PORTFOLIO PARAMETERS
@@ -150,17 +157,16 @@ WINSORIZE_LIMITS = (0.05, 0.05)  # (lower, upper) percentiles to winsorize
 
 OUTPUT_DIRS = {
     'factors': 'outputs/factors',
-    'portfolio': 'outputs/portfolio',
-    'weights': 'outputs/weights',
-    'analysis': 'outputs/analysis',
-    'performance': 'outputs/performance_2026',
+    'portfolio_us': 'outputs/portfolio_us',
+    'portfolio_eu': 'outputs/portfolio_eu',
+    'portfolio_combined': 'outputs/portfolio_combined',
     'hrp_weights': 'outputs/hrp_weights',
 }
 
-# Performance automation: workbook with EU DATA / US DATA / EU PORTFOLIO / US PORTFOLIO / TOTAL DAILY
-PERFORMANCE_WORKBOOK_FILENAME = 'Performance_SPRING_2026.xlsx'
-# Total notional (long + short). Sheet uses half per leg; e.g. 5000 → 2500 per side (match row-162 sums in sheet).
-PERFORMANCE_TOTAL_AMOUNT = 5000
+
+def get_output_path(name):
+    """Return absolute path for a named output directory (e.g. 'factors', 'hrp_weights')."""
+    return PROJECT_ROOT / OUTPUT_DIRS[name]
 
 # Save intermediate results
 SAVE_FACTOR_SCORES = True   # Save stock-level factor scores
@@ -187,8 +193,8 @@ def get_portfolio_weights(factors=None):
         import pandas as pd
         import os
         
-        weights_file = os.path.join(OUTPUT_DIRS['weights'], 'hrp_weights.xlsx')
-        if os.path.exists(weights_file):
+        weights_file = get_output_path('hrp_weights') / 'hrp_weights.xlsx'
+        if weights_file.exists():
             weights_df = pd.read_excel(weights_file, index_col=0)
             return weights_df['Weight'].to_dict()
         else:

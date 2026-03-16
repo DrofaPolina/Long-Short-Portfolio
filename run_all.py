@@ -16,7 +16,8 @@ import pandas as pd
 import numpy as np
 
 # Project root and path setup (so we can import from src and write outputs in one place)
-ROOT = Path(__file__).resolve().parent
+import config
+ROOT = config.PROJECT_ROOT
 os.chdir(ROOT)
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "src"))  # so src modules can "from data_loader import ..."
@@ -30,7 +31,7 @@ from src.liquidity import calculate_liquidity_factor_monthly
 from src.yield_factor import calculate_yield_factors_monthly
 from src.lowvol import calculate_lowvol_factor_monthly
 
-OUTPUT_FACTORS = ROOT / "outputs" / "factors"
+OUTPUT_FACTORS = config.get_output_path("factors")
 
 
 def run_all_factors():
@@ -67,7 +68,7 @@ def run_all_factors():
         _liq_file = "Minerva_Size_Factor.xlsx"
     liq_path = Path(_liq_file)
     if not liq_path.is_absolute():
-        liq_path = ROOT / liq_path
+        liq_path = config.get_data_path(_liq_file)
     if liq_path.exists():
         liq = calculate_liquidity_factor_monthly(
             file_path=str(liq_path),
@@ -188,7 +189,7 @@ def main():
     perf = performance_stats(ff)
 
     # Save portfolio outputs
-    out_port = ROOT / "outputs" / f"portfolio_{region}"
+    out_port = config.get_output_path(f"portfolio_{region}")
     out_port.mkdir(parents=True, exist_ok=True)
     ff.to_excel(out_port / "factor_returns.xlsx")
     perf.to_excel(out_port / "performance_stats.xlsx")
