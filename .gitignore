@@ -16,12 +16,15 @@ build/
 .ipynb_checkpoints/
 
 # Outputs (optional: remove if you want to track outputs/)
-outputs/
-src/outputs/
+# outputs/
+# src/outputs/
 
 # Data folder and temp/cache files
+# Keep the repo lightweight: ignore large input files, but commit Tickers.xlsx
 DATA/
-data/
+data/*
+!data/Tickers.xlsx
+!data/Tickers_HRP.xlsx
 *.zip
 temp/
 

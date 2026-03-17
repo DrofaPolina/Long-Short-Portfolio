@@ -1,20 +1,19 @@
 """
 HRP (Hierarchical Risk Parity) allocation script.
 
-Follows HRP_Allocation.ipynb workflow: reads data from Google (Drive or Sheets),
-runs HRP for long/short US and EU legs, and saves weights to file.
+Reads ticker lists and returns, runs HRP per leg, saves weights to file.
 
-Data source (only from Google):
-  - By default: download Tickers.xlsx, US_Returns.xlsx, EU_Returns.xlsx from Google Drive (gdown).
-  - With --use-sheets: read from Google Sheets export URLs (no local files; set env or pass URLs).
+Data source:
+  - Default: Google Sheets (set env HRP_TICKERS_URLS, HRP_US_RETURNS_URL, HRP_EU_RETURNS_URL or pass URLs).
+  - With --local: use data/Tickers.xlsx and US_Returns.xlsx, EU_Returns.xlsx (download from Drive if missing).
 
 Outputs:
   - hrp_weights.xlsx: all four legs (long_eu, long_us, short_eu, short_us) in one workbook
 
 Usage:
-  python hrp_allocation.py
-  python hrp_allocation.py --download
-  python hrp_allocation.py --use-sheets [--tickers-url url] [--us-returns-url url] [--eu-returns-url url]
+  python hrp_allocation.py                    # Sheets (env must be set)
+  python hrp_allocation.py --local           # Local files (download if missing)
+  python hrp_allocation.py --local --download
 """
 
 from __future__ import annotations
@@ -309,30 +308,38 @@ def download_if_missing(path: Path, drive_id: str) -> Path:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="HRP allocation: compute weights (data from Google only).")
-    parser.add_argument("--tickers", type=Path, default=DEFAULT_TICKERS_FILE, help="Tickers.xlsx path (if local)")
-    parser.add_argument("--us-returns", type=Path, default=DEFAULT_US_RETURNS_FILE, help="US_Returns.xlsx path (if local)")
-    parser.add_argument("--eu-returns", type=Path, default=DEFAULT_EU_RETURNS_FILE, help="EU_Returns.xlsx path (if local)")
+    parser = argparse.ArgumentParser(
+        description="HRP allocation: compute weights. Default: read from Google Sheets (set HRP_* env or pass URLs). Use --local for local files."
+    )
+    parser.add_argument("--local", action="store_true", help="Use local data/Tickers.xlsx and US_Returns, EU_Returns (download from Drive if missing)")
+    parser.add_argument("--tickers", type=Path, default=DEFAULT_TICKERS_FILE, help="Tickers.xlsx path (with --local)")
+    parser.add_argument("--us-returns", type=Path, default=DEFAULT_US_RETURNS_FILE, help="US_Returns.xlsx path (with --local)")
+    parser.add_argument("--eu-returns", type=Path, default=DEFAULT_EU_RETURNS_FILE, help="EU_Returns.xlsx path (with --local)")
     parser.add_argument("--out-dir", type=Path, default=DEFAULT_OUT_DIR, help="Output directory")
-    parser.add_argument("--download", action="store_true", help="Force download from Google Drive (default: download if files missing)")
-    parser.add_argument("--use-sheets", action="store_true", help="Read from Google Sheets export URLs only (no Drive/local)")
-    parser.add_argument("--tickers-urls", nargs=4, metavar="URL", help="4 CSV export URLs: long_us short_us long_eu short_eu (with --use-sheets)")
-    parser.add_argument("--us-returns-url", help="US returns sheet CSV export URL (with --use-sheets)")
-    parser.add_argument("--eu-returns-url", help="EU returns sheet CSV export URL (with --use-sheets)")
+    parser.add_argument("--download", action="store_true", help="Force download from Google Drive (with --local)")
+    parser.add_argument("--tickers-urls", nargs=4, metavar="URL", help="4 CSV export URLs: long_us short_us long_eu short_eu (default; or set HRP_TICKERS_URLS)")
+    parser.add_argument("--us-returns-url", help="US returns sheet CSV export URL (default; or set HRP_US_RETURNS_URL)")
+    parser.add_argument("--eu-returns-url", help="EU returns sheet CSV export URL (default; or set HRP_EU_RETURNS_URL)")
     parser.add_argument("--cap", type=float, default=HRP_CAP, help="Max weight per asset")
     parser.add_argument("--target-sum", type=float, default=HRP_TARGET_SUM, help="Target sum per leg (e.g. 0.5)")
     args = parser.parse_args()
 
-    if args.use_sheets:
-        urls = args.tickers_urls or os.environ.get("HRP_TICKERS_URLS", "").split()
+    use_sheets = not args.local
+
+    if use_sheets:
+        urls = args.tickers_urls or (os.environ.get("HRP_TICKERS_URLS", "") or "").split()
         if len(urls) < 4:
             raise SystemExit(
-                "With --use-sheets provide --tickers-urls URL URL URL URL (4 URLs) or set HRP_TICKERS_URLS env."
+                "Default is Google Sheets. Set HRP_TICKERS_URLS (4 space-separated URLs: long_us short_us long_eu short_eu) "
+                "or pass --tickers-urls URL URL URL URL. Alternatively use --local for local files."
             )
         us_url = args.us_returns_url or os.environ.get("HRP_US_RETURNS_URL", "")
         eu_url = args.eu_returns_url or os.environ.get("HRP_EU_RETURNS_URL", "")
         if not us_url or not eu_url:
-            raise SystemExit("With --use-sheets provide --us-returns-url and --eu-returns-url (or set env HRP_US_RETURNS_URL, HRP_EU_RETURNS_URL).")
+            raise SystemExit(
+                "Set HRP_US_RETURNS_URL and HRP_EU_RETURNS_URL (or pass --us-returns-url and --eu-returns-url). "
+                "Alternatively use --local for local files."
+            )
         run_hrp_from_sheets(
             urls[:4], us_url, eu_url, args.out_dir, cap=args.cap, target_sum=args.target_sum
         )
@@ -342,7 +349,6 @@ def main():
     us_path = args.us_returns
     eu_path = args.eu_returns
 
-    # Notebook workflow: only read from Google — download from Drive if local files missing
     if not tickers_path.exists() or args.download:
         download_if_missing(tickers_path, TICKERS_DRIVE_ID)
     if not us_path.exists() or args.download:

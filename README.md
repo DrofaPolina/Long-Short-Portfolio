@@ -1,121 +1,154 @@
 # Minerva Code – Factor portfolio pipeline
 
-Factor pipeline: Value, Momentum, Liquidity, Quality, Yield (BETA0/BETA1/BETA2), Low Vol. Builds regional (US/EU) and combined factor returns and runs portfolio analysis.
+Multi-factor pipeline (Value, Momentum, Liquidity, Quality, Yield, Low Vol) with two weighting schemes: **HRP** (stock-level) and **Factor momentum / TSFM** (factor-level then stock-level). Outputs feed into performance workbooks.
 
-For **project layout, path rules, and improvement ideas** see [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md).
+---
 
-## Setup
+## Data files (local, not from remote)
 
-From the project root (folder containing `run_all.py` and `src/`):
+All paths below are under the **`data/`** folder at the project root. The repo is set up so only `Tickers.xlsx` (and optionally `Tickers_HRP.xlsx`) are tracked; everything else in `data/` is gitignored.
+
+| File | Required? | Used by |
+|------|-----------|--------|
+| **`data/Tickers.xlsx`** | **Yes** | run_all (ticker list), HRP with `--local`. Intended to be in the repo so the project runs out of the box. |
+| **`data/Performance_SPRING_2026.xlsx`** | **Yes** (for performance step) | `performance_from_hrp.py` and run_all’s final performance step. Add this file locally; it is not in the repo. |
+| `data/Tickers_HRP.xlsx` | Optional | One-time source for `copy_tickers_hrp_to_tickers.py` to refresh `Tickers.xlsx`. |
+| `data/Minerva_Size_Factor.xlsx` | Optional | Liquidity factor in run_all. If missing, LIQ uses cached output or placeholder. |
+| `data/US_Returns.xlsx`, `data/EU_Returns.xlsx` | Only for HRP `--local` | `hrp_allocation.py --local`. With default (Google Sheets) they are not needed. |
+
+**Summary:** Put **`Performance_SPRING_2026.xlsx`** in `data/` if you want the performance step and run_all end-to-end. Keep **`Tickers.xlsx`** in the repo. Other files are optional or only for `hrp_allocation.py --local`.
+
+---
+
+## How to use
+
+**From the project root** (folder containing `run_all.py` and `src/`):
 
 ```bash
 pip install -r requirements.txt
 ```
 
-## Run
+### 1. Factors and portfolio
 
-- **Check that output paths are correct:**  
-  `python verify_output_paths.py`
-
-- **Full pipeline (no notebooks):**  
-  `python run_all.py`  
-  Default: combined region. Use `--region us` or `--region eu` for regional outputs.
-
-- **HRP weights:**  
-  `python hrp_allocation.py` → writes `outputs/hrp_weights/hrp_weights.xlsx`
-
-- **US portfolio (AR–AX from performance workbook):**  
-  `python us_portfolio_performance.py [path_to.xlsx]` → `outputs/portfolio_us/`
-
-- **Notebooks (run pipeline + analysis + plots):**  
-  Open and run all cells. Run from project root so imports work.
-  - `portfolio_analysis.ipynb` – runs pipeline, scenario analysis, saves plots to `outputs/plots/`
-  - `Factor_Portfolio_US.ipynb` – US factor matrix, metrics, distributions, heatmap → `outputs/plots/us/`
-  - `Factor_Portfolio_EU.ipynb` – EU same → `outputs/plots/eu/`
-
-## Project structure
-
-Keep everything under one project root. Suggested layout:
-
-```
-Minerva Code/
-├── .gitignore
-├── README.md
-├── requirements.txt
-├── config.py              # Weights, active factors, paths
-├── run_all.py             # Run all factors + build portfolio outputs
-├── portfolio_analysis.ipynb
-├── Factor_Portfolio_US.ipynb
-├── Factor_Portfolio_EU.ipynb
-├── factor_performance_backtest.ipynb
-├── data/                  # Put input data here (ignored by git)
-├── src/                   # Factor modules
-│   ├── temp/              # Cache/temp files from data_loader (ignored by git)
-│   ├── data_loader.py
-│   ├── value.py
-│   ├── momentum.py
-│   ├── quality.py
-│   ├── liquidity.py
-│   ├── yield_factor.py
-│   └── lowvol.py
-└── outputs/               # Generated (ignored by git)
-    ├── factors/
-    ├── portfolio_us/
-    ├── portfolio_eu/
-    ├── portfolio_combined/
-    └── plots/
+```bash
+python run_all.py
 ```
 
-- **data/** (or **DATA/**): input files; not committed (in `.gitignore`).
-- **outputs/**: factor outputs and plots; not committed.
-- **src/temp/**: cache/temp files from data_loader (e.g. downloaded Excel/CSV from Google); not committed.
-- **REDUNDANT_OR_STANDALONE.md**: also in `.gitignore`.
-- **src/outputs/**: do not use; all outputs go under root `outputs/` (see PROJECT_STRUCTURE.md).
+- Runs all factor modules, writes `outputs/factors/*` (returns, positions).
+- Builds regional/combined factor returns and portfolio stats.
+- Option: `--region us` or `--region eu`.
+- **Note:** `data/Tickers.xlsx` is **not** overwritten by default (see [Tickers](#tickers) below).
+
+### 2. Stock weights (HRP)
+
+**Default: Google Sheets.** Set env vars `HRP_TICKERS_URLS` (4 space-separated CSV export URLs), `HRP_US_RETURNS_URL`, `HRP_EU_RETURNS_URL`, then:
+
+```bash
+python hrp_allocation.py
+```
+
+To use local files instead (and download from Drive if missing):
+
+```bash
+python hrp_allocation.py --local
+```
+
+- **Output:** `outputs/hrp_weights/hrp_weights.xlsx` (sheets: long_us, short_us, long_eu, short_eu).
+
+### 3. Factor weights (TSFM) and TSFM stock weights
+
+```bash
+python factor_momentum.py
+python tsfm_stock_weights.py
+```
+
+- **factor_momentum.py** → `outputs/hrp_weights/factor_momentum_weights.xlsx` (factor weights from time-series momentum).
+- **tsfm_stock_weights.py** → `outputs/hrp_weights/tsfm_stock_weights.xlsx` (stock-level weights using TSFM factor weights and factor positions).
+
+### 4. Performance from weight files
+
+Requires **`data/Performance_SPRING_2026.xlsx`** (see [Data files](#data-files-local-not-from-remote)).
+
+```bash
+python performance_from_hrp.py
+```
+
+- Reads `hrp_weights.xlsx` and `tsfm_stock_weights.xlsx`, plus `data/Performance_SPRING_2026.xlsx`.
+- **Output:** `outputs/portfolio_combined/performance_from_hrp.xlsx` and `performance_from_tsfm.xlsx`.
+
+### Tickers
+
+- **HRP** and **run_all** expect `data/Tickers.xlsx` with four sheets: **long_us**, **short_us**, **long_eu**, **short_eu** (one ticker per row, column `TICKER` or first column).
+- **Current state (important):** For HRP, the ticker universe is effectively **hardcoded by `data/Tickers.xlsx`** (this file is intended to be committed so the repo is runnable out of the box).
+- To align with a canonical set: put `Tickers_HRP.xlsx` in `data/` and run once:
+  ```bash
+  python copy_tickers_hrp_to_tickers.py
+  ```
+- The step that would overwrite `Tickers.xlsx` from factor positions is **disabled** in `run_all.py` so the file is not modified by the pipeline; re-enable when pooling logic is fixed.
 
 ---
 
-## Set up the repo and push to GitHub
+## Logic (short)
 
-### 1. Create the repository on GitHub
+### HRP (Hierarchical Risk Parity) — `hrp_allocation.py`
 
-- Go to [github.com](https://github.com) → **New repository**.
-- Name it (e.g. `minerva-code`).
-- Do **not** add a README, .gitignore, or license (you have them locally).
-- Click **Create repository**.
+- **Input:** Ticker lists (long/short US/EU) and a returns matrix (e.g. from US_Returns + EU_Returns).
+- **Per leg:**  
+  1. Use returns of the leg’s tickers to compute a **correlation matrix**, then turn it into a **distance** (e.g. \(\sqrt{0.5(1-\rho)}\)).  
+  2. **Hierarchical clustering** (e.g. single linkage) on that distance; get asset order from the dendrogram leaves.  
+  3. **Recursive bisection:** sort the covariance matrix by that order, split into two blocks, assign inverse-variance weights within each block and combine so that risk is balanced between blocks; recurse.  
+  4. **Cap** weights (e.g. 10%) and **normalize** so the leg sums to a target (e.g. 0.5).  
+- **Output:** One weight vector per leg → `hrp_weights.xlsx` (four sheets).
 
-### 2. Initialise git and push (first time)
+### Factor momentum (TSFM) — `factor_momentum.py`
 
-In a terminal, from the project root (the folder that contains `run_all.py` and `src/`):
+- **Input:** Monthly factor returns in `outputs/factors/*_regional.xlsx` (from run_all).
+- **At each rebalance date** (e.g. Jan and Jul):  
+  1. **Formation return** = compounded return over the last 12 months.  
+  2. **Volatility** = annualized vol over the last 36 months.  
+  3. **Signal** = formation return / vol, **capped** (e.g. ±2).  
+  4. **Weights** = proportional to absolute signal, normalized to sum to 1 (long/short by sign of signal).  
+- **Output:** Current factor weights and history → `factor_momentum_weights.xlsx`. These weights are used by `config.get_portfolio_weights()` and by `tsfm_stock_weights.py` to build stock-level TSFM weights.
+
+---
+
+## Layout
+
+```
+Minerva Code/
+├── config.py           # Active factors, paths, TSFM/HRP params
+├── run_all.py          # Run all factors + portfolio (does not overwrite Tickers)
+├── hrp_allocation.py   # HRP stock weights
+├── factor_momentum.py  # TSFM factor weights
+├── tsfm_stock_weights.py  # TSFM → stock weights (same format as hrp_weights)
+├── performance_from_hrp.py # Performance from hrp + tsfm weight files
+├── copy_tickers_hrp_to_tickers.py  # One-time: Tickers_HRP → Tickers.xlsx
+├── data/               # Tickers.xlsx, US_Returns, EU_Returns, Performance_*.xlsx, etc.
+├── src/                 # Factor modules (value, momentum, quality, liquidity, yield, lowvol)
+└── outputs/
+    ├── factors/         # Factor returns, *_positions.xlsx
+    ├── hrp_weights/     # hrp_weights.xlsx, factor_momentum_weights.xlsx, tsfm_stock_weights.xlsx
+    └── portfolio_combined/  # performance_from_hrp.xlsx, performance_from_tsfm.xlsx
+```
+
+- **data/** and **outputs/** are typically in `.gitignore`.
+
+For more on layout and path rules, see [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md).
+
+---
+
+## Git: push to GitHub
+
+1. Create an empty repo on GitHub (no README/.gitignore).
+2. From project root:
 
 ```bash
-cd "/Users/polina/Downloads/Minerva Code"
-
 git init
 git add .
-git status
 git commit -m "Initial commit: factor pipeline and notebooks"
 git branch -M main
-git remote add origin https://github.com/YOUR_USERNAME/YOUR_REPO_NAME.git
+git remote add origin https://github.com/YOUR_USERNAME/YOUR_REPO.git
 git push -u origin main
 ```
 
-- Replace **YOUR_USERNAME** with your GitHub username.
-- Replace **YOUR_REPO_NAME** with the repo name you chose (e.g. `minerva-code`).
-
-### 3. If GitHub asks for a password
-
-Git no longer accepts account passwords for push. Use a **Personal access token**:
-
-- GitHub → **Settings** → **Developer settings** → **Personal access tokens** → **Tokens (classic)** → **Generate new token**.
-- Give it a name, tick **repo**, generate, then **copy the token**.
-- When `git push` asks for a password, paste the **token** (not your GitHub password).
-
-### 4. Later: push more changes
-
-```bash
-cd "/Users/polina/Downloads/Minerva Code"
-git add .
-git status
-git commit -m "Short description of what you changed"
-git push
-```
+Use a **Personal access token** (not account password) when `git push` asks for credentials.
