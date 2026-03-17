@@ -21,6 +21,7 @@ sys.path.append('src')
 # Default: write to project root outputs/factors (same regardless of cwd)
 _DEFAULT_FACTOR_OUTPUT = str(Path(__file__).resolve().parent.parent / "outputs" / "factors")
 from data_loader import load_stock_returns_us, load_stock_returns_eu
+from factor_positions_io import save_positions_excel
 
 
 def calculate_momentum_signal(returns, lookback=12, skip=1):
@@ -50,57 +51,65 @@ def calculate_momentum_signal(returns, lookback=12, skip=1):
 def calculate_momentum_factor(returns, momentum_signal, long_short_pct=0.10, min_start_idx=60):
     """
     Calculate momentum factor using long-short strategy.
-    
+
     Parameters:
         returns: pd.DataFrame - Daily returns
         momentum_signal: pd.DataFrame - Momentum signals
         long_short_pct: float - Percentage for long/short (0.10 = top/bottom deciles)
         min_start_idx: int - Minimum index to start (for data history)
-    
+
     Returns:
-        pd.Series - Daily momentum factor returns
+        tuple: (pd.Series of daily factor returns, last_long_tickers, last_short_tickers, history)
+        history: list of (date, long_list, short_list) at Jan/Jul rebalance dates
     """
     signal = momentum_signal.reindex(columns=returns.columns)
-    
+
     dates = signal.index
     T, N = signal.shape
-    
+
     first_idx = max(min_start_idx, 12 + 1)
     momentum_factor = pd.Series(np.nan, index=dates, dtype=float)
-    
+    last_long, last_short = [], []
+    history = []
+
     t = first_idx
     while t < T - 1:
         dt = dates[t]
         x = signal.loc[dt].dropna()
-        
+
         if len(x) < 20:
             t += 1
             continue
-        
+
         # Rank and select top/bottom
         cutoff_high = x.quantile(1 - long_short_pct)
         cutoff_low = x.quantile(long_short_pct)
-        
+
         long_names = x[x >= cutoff_high].index.tolist()
         short_names = x[x <= cutoff_low].index.tolist()
-        
+
         if len(long_names) < 5 or len(short_names) < 5:
             t += 1
             continue
-        
+
+        last_long, last_short = long_names, short_names
+        # Record at last day of Jan or Jul (rebalance dates only)
+        if dt.month in (1, 7) and (t + 1 >= T or dates[t + 1].month != dt.month):
+            history.append((dt, long_names, short_names))
+
         # Calculate next period's return
         dt_next = dates[t + 1]
         r_next = returns.loc[dt_next]
-        
+
         long_ret = r_next.reindex(long_names).mean()
         short_ret = r_next.reindex(short_names).mean()
-        
+
         if pd.notna(long_ret) and pd.notna(short_ret):
             momentum_factor.loc[dt_next] = long_ret - short_ret
-        
+
         t += 1
-    
-    return momentum_factor.dropna()
+
+    return momentum_factor.dropna(), last_long, last_short, history
 
 
 def calculate_momentum_factor_monthly(us_returns, eu_returns, save_outputs=True, output_dir=None):
@@ -124,7 +133,7 @@ def calculate_momentum_factor_monthly(us_returns, eu_returns, save_outputs=True,
     
     print("\n[1/3] Calculating US momentum...")
     us_signal = calculate_momentum_signal(us_returns, lookback=12, skip=1)
-    us_factor = calculate_momentum_factor(us_returns, us_signal)
+    us_factor, mom_last_long_us, mom_last_short_us, history_us = calculate_momentum_factor(us_returns, us_signal)
     
     # Convert to monthly
     us_factor_monthly = (1 + us_factor).resample('M').prod() - 1
@@ -135,7 +144,7 @@ def calculate_momentum_factor_monthly(us_returns, eu_returns, save_outputs=True,
     
     print("\n[2/3] Calculating EU momentum...")
     eu_signal = calculate_momentum_signal(eu_returns, lookback=12, skip=1)
-    eu_factor = calculate_momentum_factor(eu_returns, eu_signal)
+    eu_factor, mom_last_long_eu, mom_last_short_eu, history_eu = calculate_momentum_factor(eu_returns, eu_signal)
     
     # Convert to monthly
     eu_factor_monthly = (1 + eu_factor).resample('M').prod() - 1
@@ -155,7 +164,9 @@ def calculate_momentum_factor_monthly(us_returns, eu_returns, save_outputs=True,
     results = {
         'US': us_factor_monthly,
         'EU': eu_factor_monthly,
-        'combined': combined
+        'combined': combined,
+        'picks_us': (mom_last_long_us, mom_last_short_us),
+        'picks_eu': (mom_last_long_eu, mom_last_short_eu),
     }
     
     # Save outputs
@@ -171,6 +182,13 @@ def calculate_momentum_factor_monthly(us_returns, eu_returns, save_outputs=True,
         # Save regional breakdown
         combined.to_excel(f'{output_dir}/momentum_regional.xlsx')
         print(f"  ✓ Saved momentum_regional.xlsx")
+        # Positions at Jan/Jul rebalance dates only (Date, Ticker per sheet)
+        long_us = [(d, long_l) for d, long_l, _ in history_us]
+        short_us = [(d, short_l) for d, _, short_l in history_us]
+        long_eu = [(d, long_l) for d, long_l, _ in history_eu]
+        short_eu = [(d, short_l) for d, _, short_l in history_eu]
+        save_positions_excel(long_us, short_us, long_eu, short_eu, Path(output_dir) / "momentum_positions.xlsx")
+        print(f"  ✓ Saved momentum_positions.xlsx")
     
     print("\n" + "=" * 60)
     print("MOMENTUM FACTOR COMPLETE")

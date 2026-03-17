@@ -490,6 +490,7 @@ def _run_illiq_pipeline_for_dataset(
 # =============================================================================
 # Default: write to project root outputs/factors (same regardless of cwd)
 _DEFAULT_FACTOR_OUTPUT = str(Path(__file__).resolve().parent.parent / "outputs" / "factors")
+from factor_positions_io import save_positions_excel
 
 # PUBLIC ENTRY POINT (like other factor scripts)
 # =============================================================================
@@ -550,10 +551,44 @@ def calculate_liquidity_factor_monthly(
     combined = pd.DataFrame({"LIQ_US": liq_us, "LIQ_EU": liq_eu})
     combined["LIQ"] = combined.mean(axis=1, skipna=True)
 
+    # Picks for pooling: last row of picks (longs/shorts as comma-sep)
+    def _parse_picks_row(picks_df):
+        if picks_df is None or picks_df.empty:
+            return [], []
+        row = picks_df.iloc[-1]
+        longs = row.get("longs", "")
+        shorts = row.get("shorts", "")
+        long_list = [x.strip() for x in str(longs).split(",") if x.strip()] if pd.notna(longs) else []
+        short_list = [x.strip() for x in str(shorts).split(",") if x.strip()] if pd.notna(shorts) else []
+        return long_list, short_list
+
+    def _positions_jan_jul_from_picks(picks_df):
+        if picks_df is None or picks_df.empty:
+            return [], []
+        long_rows, short_rows = [], []
+        for _, row in picks_df.iterrows():
+            dt = pd.Timestamp(row["date"]) if "date" in picks_df.columns else pd.Timestamp(row.name)
+            if dt.month not in (1, 7):
+                continue
+            longs = row.get("longs", "")
+            shorts = row.get("shorts", "")
+            long_list = [x.strip() for x in str(longs).split(",") if x.strip()] if pd.notna(longs) else []
+            short_list = [x.strip() for x in str(shorts).split(",") if x.strip()] if pd.notna(shorts) else []
+            if long_list:
+                long_rows.append((dt, long_list))
+            if short_list:
+                short_rows.append((dt, short_list))
+        return long_rows, short_rows
+
+    long_us, short_us = _positions_jan_jul_from_picks(picks_us)
+    long_eu, short_eu = _positions_jan_jul_from_picks(picks_eu)
+
     results = {
         "US": liq_us,
         "EU": liq_eu,
         "combined": combined,
+        "picks_us": _parse_picks_row(picks_us),
+        "picks_eu": _parse_picks_row(picks_eu),
     }
 
     # Save outputs
@@ -569,6 +604,8 @@ def calculate_liquidity_factor_monthly(
         # Regional breakdown
         combined.to_excel(f"{output_dir}/liquidity_regional.xlsx")
         print("  ✓ Saved liquidity_regional.xlsx")
+        save_positions_excel(long_us, short_us, long_eu, short_eu, Path(output_dir) / "liquidity_positions.xlsx")
+        print("  ✓ Saved liquidity_positions.xlsx")
 
         # Optionally also export the detailed CSVs from original notebook
         # (deciles, picks, weights) for US/EU, with region tags.

@@ -65,41 +65,10 @@ PORTFOLIO_WEIGHTS = {
     'LVOL': 0.25
 }
 
-# Default weights per region (used by build_portfolio_unified for weighted portfolio return)
-# Yield factor = three betas: BETA0 (level), BETA1 (slope), BETA2 (curvature)
-DEFAULT_WEIGHTS_US = {
-    'SIZE_US': 0.1,
-    'VAL_US': 0.15,
-    'MOM_US': 0.1,
-    'QLT_US': 0.2,
-    'LVOL_US': 0.25,
-    'BETA0_US': -0.10,
-    'BETA1_US': 0.05,
-    'BETA2_US': 0.05,
-}
-DEFAULT_WEIGHTS_EU = {
-    'SIZE_EU': 0.1,
-    'VAL_EU': 0.1,
-    'MOM_EU': 0.1,
-    'QLT_EU': 0.25,
-    'LVOL_EU': 0.25,
-    'BETA0_EU': -0.10,
-    'BETA1_EU': 0.05,
-    'BETA2_EU': 0.05,
-}
-DEFAULT_WEIGHTS_COMBINED = {
-    'SIZE': 0.1,
-    'VAL': 0.125,
-    'MOM': 0.1,
-    'QLT': 0.225,
-    'LVOL': 0.25,
-    'BETA0': -0.10,
-    'BETA1': 0.05,
-    'BETA2': 0.05,
-}
-
-# Alternative: Load weights from HRP optimization
-USE_HRP_WEIGHTS = True  # If True, load from outputs/hrp_weights/hrp_weights.xlsx (written by hrp_allocation.py)
+# Factor-level weights source (for analysis, reporting, combined factor return)
+# Priority: TSFM file > HRP file > static PORTFOLIO_WEIGHTS
+USE_TSFM_WEIGHTS = True   # If True, load from outputs/hrp_weights/factor_momentum_weights.xlsx (from factor_momentum.py)
+USE_HRP_WEIGHTS = False   # If True and no TSFM, load from hrp_weights.xlsx first sheet (legacy)
 
 # ============================================
 # LONG-SHORT PORTFOLIO PARAMETERS
@@ -123,6 +92,14 @@ HRP_CONFIG = {
     'distance_metric': 'correlation'  # correlation, euclidean
 }
 
+# TSFM (Time-Series Factor Momentum) — used by factor_momentum.py
+TSFM_CONFIG = {
+    'formation_months': 12,   # Formation return lookback (months)
+    'vol_months': 36,        # Volatility lookback (months)
+    'signal_cap': 2.0,       # Cap signal in [-signal_cap, +signal_cap]
+    'rebalance_months': (1, 7),  # Jan and Jul
+}
+
 # Mean-Variance optimization settings
 MVO_CONFIG = {
     'long_exposure': 0.5,     # Total long exposure
@@ -137,19 +114,12 @@ MVO_CONFIG = {
 # DATA PARAMETERS
 # ============================================
 
-# Rolling window parameters
+# Rolling window parameters (used by quality.py, lowvol.py)
 EVOL_WINDOW = 20           # Earnings volatility rolling window (quarters)
 EVOL_MIN_PERIODS = 12      # Minimum periods for EVOL calculation
 
 VOL_WINDOW = 60            # Volatility rolling window (days)
 VOL_MIN_PERIODS = 30       # Minimum periods for volatility
-
-MOMENTUM_WINDOW = 252      # Momentum lookback (1 year)
-
-# Industry neutralization
-INDUSTRY_NEUTRAL = True
-INDUSTRY_TRANSFORM = 'yeo'  # 'yeo' or 'normal'
-WINSORIZE_LIMITS = (0.05, 0.05)  # (lower, upper) percentiles to winsorize
 
 # ============================================
 # OUTPUT SETTINGS
@@ -168,11 +138,6 @@ def get_output_path(name):
     """Return absolute path for a named output directory (e.g. 'factors', 'hrp_weights')."""
     return PROJECT_ROOT / OUTPUT_DIRS[name]
 
-# Save intermediate results
-SAVE_FACTOR_SCORES = True   # Save stock-level factor scores
-SAVE_FACTOR_RETURNS = True  # Save factor returns
-SAVE_DIAGNOSTICS = True     # Save diagnostic plots and stats
-
 # ============================================
 # HELPER FUNCTIONS
 # ============================================
@@ -185,26 +150,42 @@ def get_active_factors():
 def get_portfolio_weights(factors=None):
     """
     Get portfolio weights for specified factors.
-    
-    If USE_HRP_WEIGHTS is True, loads from HRP output file.
-    Otherwise uses PORTFOLIO_WEIGHTS dict.
+
+    Priority: TSFM file (factor_momentum_weights.xlsx) > HRP file > static PORTFOLIO_WEIGHTS.
+    Used for analysis, reporting, and combined factor return (not for stock-level HRP weights).
     """
+    import pandas as pd
+
+    # 1) TSFM factor weights (from factor_momentum.py)
+    if USE_TSFM_WEIGHTS:
+        tsfm_file = get_output_path('hrp_weights') / 'factor_momentum_weights.xlsx'
+        if tsfm_file.exists():
+            try:
+                current = pd.read_excel(tsfm_file, sheet_name='current')
+                if 'Factor' in current.columns and 'Weight' in current.columns:
+                    out = current.set_index('Factor')['Weight'].to_dict()
+                    if factors is not None:
+                        out = {k: out[k] for k in factors if k in out}
+                    return out
+            except Exception as e:
+                print(f"Warning: Could not read TSFM weights from {tsfm_file}: {e}")
+                print("Falling back to configured weights")
+        else:
+            print(f"Warning: TSFM weights file not found at {tsfm_file}. Run: python factor_momentum.py")
+            print("Falling back to configured weights")
+
+    # 2) Legacy: HRP file first sheet (stock-level weights interpreted as factor; rarely used)
     if USE_HRP_WEIGHTS:
-        import pandas as pd
-        import os
-        
         weights_file = get_output_path('hrp_weights') / 'hrp_weights.xlsx'
         if weights_file.exists():
             weights_df = pd.read_excel(weights_file, index_col=0)
-            return weights_df['Weight'].to_dict()
-        else:
-            print(f"Warning: HRP weights file not found at {weights_file}")
-            print("Falling back to configured weights")
-    
-    # Use configured weights
+            if 'Weight' in weights_df.columns:
+                return weights_df['Weight'].to_dict()
+        print("Falling back to configured weights")
+
+    # 3) Static config
     if factors is None:
         factors = get_active_factors()
-    
     return {k: PORTFOLIO_WEIGHTS[k] for k in factors if k in PORTFOLIO_WEIGHTS}
 
 

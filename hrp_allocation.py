@@ -154,7 +154,8 @@ def hrp_weights_for_leg(
         D = np.where(np.isfinite(D), D, 0.0)
         np.fill_diagonal(D, 0.0)
     D_condensed = squareform(D, checks=False)
-    Z = linkage(D_condensed, method="single")
+    linkage_method = _config.HRP_CONFIG.get("linkage_method", "single")
+    Z = linkage(D_condensed, method=linkage_method)
     res_order = leaves_list(Z).astype(int)
     N = len(res_order)
     V_sorted = cov[np.ix_(res_order, res_order)]

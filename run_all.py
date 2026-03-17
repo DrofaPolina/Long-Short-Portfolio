@@ -34,6 +34,36 @@ from src.lowvol import calculate_lowvol_factor_monthly
 OUTPUT_FACTORS = config.get_output_path("factors")
 
 
+def _pool_and_write_tickers(val, mom, liq, qlt, lvol):
+    """
+    Pool long/short tickers from all factors (union: one stock can be selected
+    by several factors but appears once per leg) and write data/Tickers.xlsx
+    for hrp_allocation (sheets: long_us, short_us, long_eu, short_eu).
+    """
+    long_us, short_us = set(), set()
+    long_eu, short_eu = set(), set()
+    for name, res in [("VAL", val), ("MOM", mom), ("LIQ", liq), ("QLT", qlt), ("LVOL", lvol)]:
+        if not isinstance(res, dict):
+            continue
+        if "picks_us" in res and res["picks_us"]:
+            l, s = res["picks_us"]
+            long_us.update(l)
+            short_us.update(s)
+        if "picks_eu" in res and res["picks_eu"]:
+            l, s = res["picks_eu"]
+            long_eu.update(l)
+            short_eu.update(s)
+
+    tickers_path = config.get_data_path("Tickers.xlsx")
+    tickers_path.parent.mkdir(parents=True, exist_ok=True)
+    with pd.ExcelWriter(tickers_path, engine="openpyxl") as w:
+        pd.DataFrame({"TICKER": sorted(long_us)}).to_excel(w, sheet_name="long_us", index=False)
+        pd.DataFrame({"TICKER": sorted(short_us)}).to_excel(w, sheet_name="short_us", index=False)
+        pd.DataFrame({"TICKER": sorted(long_eu)}).to_excel(w, sheet_name="long_eu", index=False)
+        pd.DataFrame({"TICKER": sorted(short_eu)}).to_excel(w, sheet_name="short_eu", index=False)
+    print(f"\n  ✓ Pooled tickers written to {tickers_path} (long_us: {len(long_us)}, short_us: {len(short_us)}, long_eu: {len(long_eu)}, short_eu: {len(short_eu)})")
+
+
 def run_all_factors():
     """Run all factor calculations and return combined DataFrames for portfolio."""
     OUTPUT_FACTORS.mkdir(parents=True, exist_ok=True)
@@ -114,6 +144,10 @@ def run_all_factors():
     lvol = calculate_lowvol_factor_monthly(
         us_returns, eu_returns, save_outputs=True, output_dir=out
     )
+
+    # Pool factor picks (union: a stock can be selected by several factors, appear once)
+    # and write Tickers.xlsx for hrp_allocation
+    _pool_and_write_tickers(val=val, mom=mom, liq=liq, qlt=qlt, lvol=lvol)
 
     return {
         "VAL": val["combined"],
@@ -202,6 +236,17 @@ def main():
     best = perf["Sharpe"].idxmax()
     print(f"\nBest Sharpe: {best} ({perf.loc[best, 'Sharpe']:.3f})")
     print(f"\nResults: {out_port}/")
+
+    # Final performance from HRP weights + Performance workbook
+    try:
+        from performance_from_hrp import main as run_performance_from_hrp
+        perf_path = config.get_data_path("Performance_SPRING_2026.xlsx")
+        if perf_path.exists():
+            run_performance_from_hrp()
+        else:
+            print(f"\n(Skip final performance: {perf_path} not found)")
+    except Exception as e:
+        print(f"\n(Skip final performance: {e})")
 
 
 if __name__ == "__main__":

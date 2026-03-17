@@ -20,6 +20,8 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import config
+
 # Default: write to project root outputs/factors (same regardless of cwd)
 _DEFAULT_FACTOR_OUTPUT = str(Path(__file__).resolve().parent.parent / "outputs" / "factors")
 
@@ -29,6 +31,7 @@ from data_loader import (
     load_stock_returns_us,
     load_stock_returns_eu,
 )
+from factor_positions_io import save_positions_excel
 
 
 def _z_scores_cross_sectional(df):
@@ -43,7 +46,7 @@ def _z_scores_cross_sectional(df):
     return out
 
 
-def __align_dataframes(*dfs):
+def _align_dataframes(*dfs):
     """Align multiple DataFrames to common index and columns. Returns list of aligned DataFrames."""
     cleaned = []
     for df in dfs:
@@ -81,7 +84,7 @@ def _clean_time_index(df: pd.DataFrame, name: str) -> pd.DataFrame:
     return df.sort_index()
 
 
-def calculate_evol(roe_quarterly, window=20, min_periods=12):
+def calculate_evol(roe_quarterly, window=None, min_periods=None):
     """
     Calculate earnings volatility (EVOL).
     
@@ -89,12 +92,16 @@ def calculate_evol(roe_quarterly, window=20, min_periods=12):
     
     Parameters:
         roe_quarterly: pd.DataFrame - Quarterly ROE data
-        window: int - Rolling window size
-        min_periods: int - Minimum periods for calculation
+        window: int - Rolling window size (default from config.EVOL_WINDOW)
+        min_periods: int - Minimum periods for calculation (default from config.EVOL_MIN_PERIODS)
     
     Returns:
         pd.DataFrame - Earnings volatility scores
     """
+    if window is None:
+        window = config.EVOL_WINDOW
+    if min_periods is None:
+        min_periods = config.EVOL_MIN_PERIODS
     # Ensure numeric values and sorted unique DateTimeIndex to avoid
     # deprecation warnings about nuisance columns and non-unique indexes.
     df = roe_quarterly.copy()
@@ -123,14 +130,12 @@ def calculate_quality_score_region(roe, roe_growth, debt_eq, roe_quarterly,
     Returns:
         pd.DataFrame - Quality scores (time x stocks) for this region
     """
-    # Default weights
+    # Default weights from config (only keys used in the formula below)
     if weights is None:
         weights = {
-            'roe': 0.24,
-            'roe_growth': 0.22,
-            'debt_eq': -0.16,   # Negative: less debt = better quality
-            #'safety': 0.16,
-            'evol': -0.22       # Negative: less volatility = better quality
+            k: config.QUALITY_WEIGHTS[k]
+            for k in ('roe', 'roe_growth', 'debt_eq', 'evol')
+            if k in config.QUALITY_WEIGHTS
         }
     
     print(f"Cleaning indices for {region_name}...")
@@ -287,6 +292,22 @@ def calculate_quality_factor(save_outputs=True, output_dir=None):
     })
     combined['QLT'] = combined.mean(axis=1, skipna=True)
     
+    # Picks for pooling: last rebalance long/short per region (top 20% = long, bottom 20% = short)
+    def _positions_from_scores(score_df):
+        if score_df is None or score_df.empty:
+            return None
+        deciles = score_df.rank(axis=1, method='first', pct=True).apply(lambda x: x * 10)
+        return deciles.applymap(lambda x: 1 if x <= 2 else -1 if x >= 9 else 0)
+    def _picks_from_positions(pos):
+        if pos is None or pos.empty:
+            return [], []
+        last = pos.dropna(how="all").iloc[-1] if not pos.dropna(how="all").empty else pos.iloc[-1]
+        long_tickers = last.index[last > 0].tolist()
+        short_tickers = last.index[last < 0].tolist()
+        return long_tickers, short_tickers
+    pos_us = _positions_from_scores(quality_scores_us)
+    pos_eu = _positions_from_scores(quality_scores_eu)
+
     # Prepare results
     results = {
         'US': quality_us,
@@ -295,7 +316,28 @@ def calculate_quality_factor(save_outputs=True, output_dir=None):
         'returns': combined['QLT'],
         'scores_us': quality_scores_us,
         'scores_eu': quality_scores_eu,
+        'picks_us': _picks_from_positions(pos_us),
+        'picks_eu': _picks_from_positions(pos_eu),
     }
+
+    def _positions_jan_jul_from_positions(pos_df):
+        if pos_df is None or pos_df.empty:
+            return [], []
+        long_rows, short_rows = [], []
+        for dt in pos_df.index:
+            if dt.month not in (1, 7):
+                continue
+            row = pos_df.loc[dt]
+            long_t = row.index[row > 0].tolist()
+            short_t = row.index[row < 0].tolist()
+            if long_t:
+                long_rows.append((dt, long_t))
+            if short_t:
+                short_rows.append((dt, short_t))
+        return long_rows, short_rows
+
+    long_us, short_us = _positions_jan_jul_from_positions(pos_us)
+    long_eu, short_eu = _positions_jan_jul_from_positions(pos_eu)
     
     # Save outputs if requested
     if save_outputs:
@@ -318,6 +360,8 @@ def calculate_quality_factor(save_outputs=True, output_dir=None):
         )
         all_scores.to_excel(f'{output_dir}/quality_scores.xlsx')
         print(f"  ✓ Saved quality_scores.xlsx")
+        save_positions_excel(long_us, short_us, long_eu, short_eu, Path(output_dir) / "quality_positions.xlsx")
+        print(f"  ✓ Saved quality_positions.xlsx")
     
     print("\n" + "=" * 60)
     print("QUALITY FACTOR CALCULATION COMPLETE")

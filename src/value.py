@@ -25,10 +25,13 @@ import sys
 import os
 from pathlib import Path
 
-sys.path.append('src')
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import config
 
 # Default: write to project root outputs/factors (same regardless of cwd)
 _DEFAULT_FACTOR_OUTPUT = str(Path(__file__).resolve().parent.parent / "outputs" / "factors")
+from factor_positions_io import save_positions_excel
 
 
 def _to_num(x):
@@ -176,7 +179,7 @@ def calculate_book_to_market(bvps, shares, mcap):
     return BM, mcap
 
 
-def generate_value_signal(BM, MCAP, q=0.20):
+def generate_value_signal(BM, MCAP, q=None):
     """
     Generate long-short signals based on B/M ratio.
     
@@ -189,11 +192,13 @@ def generate_value_signal(BM, MCAP, q=0.20):
     Parameters:
         BM: pd.DataFrame - Book-to-market ratios
         MCAP: pd.DataFrame - Market caps
-        q: float - Quantile for long/short (0.20 = top/bottom 20%)
+        q: float - Quantile for long/short (default from config.LONG_SHORT_CONFIG['long_percentile'])
     
     Returns:
         pd.DataFrame - Signals (+1 = long, -1 = short, 0 = neutral)
     """
+    if q is None:
+        q = config.LONG_SHORT_CONFIG['long_percentile']
     sig = pd.DataFrame(0.0, index=BM.index, columns=BM.columns)
     
     for dt in BM.index:
@@ -311,10 +316,11 @@ def calculate_value_factor_monthly(save_outputs=True, output_dir=None):
         eu_data['bvps'], eu_data['shares'], eu_data['mcap']
     )
     
-    # Generate signals
+    # Generate signals (quantile from config.LONG_SHORT_CONFIG)
     print("\n[4/6] Generating value signals...")
-    sig_us = generate_value_signal(BM_us, mcap_us, q=0.20)
-    sig_eu = generate_value_signal(BM_eu, mcap_eu, q=0.20)
+    q = config.LONG_SHORT_CONFIG['long_percentile']
+    sig_us = generate_value_signal(BM_us, mcap_us, q=q)
+    sig_eu = generate_value_signal(BM_eu, mcap_eu, q=q)
     
     # Create overlapping portfolios
     print("\n[5/6] Creating 12-month overlapping portfolios...")
@@ -342,10 +348,41 @@ def calculate_value_factor_monthly(save_outputs=True, output_dir=None):
     })
     combined['VAL'] = combined.mean(axis=1, skipna=True)
     
+    # Picks for pooling (last rebalance date): long/short tickers per region
+    def _picks_from_active(active):
+        if active is None or active.empty:
+            return [], []
+        last = active.dropna(how="all").iloc[-1] if not active.dropna(how="all").empty else active.iloc[-1]
+        long_tickers = last.index[last > 0].tolist()
+        short_tickers = last.index[last < 0].tolist()
+        return long_tickers, short_tickers
+
+    def _positions_jan_jul_from_active(active):
+        """List of (date, long_tickers) and (date, short_tickers) at Jan/Jul only."""
+        if active is None or active.empty:
+            return [], []
+        long_rows, short_rows = [], []
+        for dt in active.index:
+            if dt.month not in (1, 7):
+                continue
+            row = active.loc[dt]
+            long_t = row.index[row > 0].tolist()
+            short_t = row.index[row < 0].tolist()
+            if long_t:
+                long_rows.append((dt, long_t))
+            if short_t:
+                short_rows.append((dt, short_t))
+        return long_rows, short_rows
+
+    long_us, short_us = _positions_jan_jul_from_active(act_us)
+    long_eu, short_eu = _positions_jan_jul_from_active(act_eu)
+
     results = {
         'US': val_us,
         'EU': val_eu,
-        'combined': combined
+        'combined': combined,
+        'picks_us': _picks_from_active(act_us),
+        'picks_eu': _picks_from_active(act_eu),
     }
     
     # Save outputs
@@ -361,6 +398,8 @@ def calculate_value_factor_monthly(save_outputs=True, output_dir=None):
         # Save regional breakdown
         combined.to_excel(f'{output_dir}/value_regional.xlsx')
         print(f"  ✓ Saved value_regional.xlsx")
+        save_positions_excel(long_us, short_us, long_eu, short_eu, Path(output_dir) / "value_positions.xlsx")
+        print(f"  ✓ Saved value_positions.xlsx")
     
     print("\n" + "=" * 60)
     print("VALUE FACTOR COMPLETE")
