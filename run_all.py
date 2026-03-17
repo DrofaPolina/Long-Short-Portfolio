@@ -36,10 +36,24 @@ OUTPUT_FACTORS = config.get_output_path("factors")
 
 def _pool_and_write_tickers(val, mom, liq, qlt, lvol):
     """
-    Pool long/short tickers from all factors (union: one stock can be selected
-    by several factors but appears once per leg) and write data/Tickers.xlsx
-    for hrp_allocation (sheets: long_us, short_us, long_eu, short_eu).
+    Write data/Tickers.xlsx for hrp_allocation (sheets: long_us, short_us, long_eu, short_eu).
+    Prefer building from *_positions.xlsx so Tickers matches the pooled position files;
+    if no position files exist, fall back to in-memory picks from factor results.
+
+    NOTE: Call site in run_all_factors() is currently commented out so run_all does not
+    overwrite data/Tickers.xlsx (which is kept in sync with Tickers_HRP). Re-enable when
+    pooling logic is fixed.
     """
+    from check_tickers_pool import write_tickers_from_positions, pool_from_positions, POSITION_FILES, SHEET_ORDER
+
+    tickers_path = config.get_data_path("Tickers.xlsx")
+    if write_tickers_from_positions(OUTPUT_FACTORS, tickers_path):
+        pooled = pool_from_positions(OUTPUT_FACTORS, POSITION_FILES)
+        print(f"\n  ✓ Tickers.xlsx built from *_positions.xlsx → {tickers_path}")
+        print(f"    (long_us: {len(pooled['long_us'])}, short_us: {len(pooled['short_us'])}, long_eu: {len(pooled['long_eu'])}, short_eu: {len(pooled['short_eu'])})")
+        return
+
+    # Fallback: pool from in-memory picks when position files are missing
     long_us, short_us = set(), set()
     long_eu, short_eu = set(), set()
     for name, res in [("VAL", val), ("MOM", mom), ("LIQ", liq), ("QLT", qlt), ("LVOL", lvol)]:
@@ -54,14 +68,13 @@ def _pool_and_write_tickers(val, mom, liq, qlt, lvol):
             long_eu.update(l)
             short_eu.update(s)
 
-    tickers_path = config.get_data_path("Tickers.xlsx")
     tickers_path.parent.mkdir(parents=True, exist_ok=True)
     with pd.ExcelWriter(tickers_path, engine="openpyxl") as w:
         pd.DataFrame({"TICKER": sorted(long_us)}).to_excel(w, sheet_name="long_us", index=False)
         pd.DataFrame({"TICKER": sorted(short_us)}).to_excel(w, sheet_name="short_us", index=False)
         pd.DataFrame({"TICKER": sorted(long_eu)}).to_excel(w, sheet_name="long_eu", index=False)
         pd.DataFrame({"TICKER": sorted(short_eu)}).to_excel(w, sheet_name="short_eu", index=False)
-    print(f"\n  ✓ Pooled tickers written to {tickers_path} (long_us: {len(long_us)}, short_us: {len(short_us)}, long_eu: {len(long_eu)}, short_eu: {len(short_eu)})")
+    print(f"\n  ✓ Pooled tickers (from in-memory picks) written to {tickers_path} (long_us: {len(long_us)}, short_us: {len(short_us)}, long_eu: {len(long_eu)}, short_eu: {len(short_eu)})")
 
 
 def run_all_factors():
@@ -145,9 +158,10 @@ def run_all_factors():
         us_returns, eu_returns, save_outputs=True, output_dir=out
     )
 
-    # Pool factor picks (union: a stock can be selected by several factors, appear once)
-    # and write Tickers.xlsx for hrp_allocation
-    _pool_and_write_tickers(val=val, mom=mom, liq=liq, qlt=qlt, lvol=lvol)
+    # Pool factor picks and write data/Tickers.xlsx for hrp_allocation.
+    # DISABLED: We use data/Tickers.xlsx copied from Tickers_HRP (run copy_tickers_hrp_to_tickers.py once).
+    # Re-enable the line below when pooling from *_positions.xlsx is fixed to match Tickers_HRP.
+    # _pool_and_write_tickers(val=val, mom=mom, liq=liq, qlt=qlt, lvol=lvol)
 
     return {
         "VAL": val["combined"],
