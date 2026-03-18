@@ -34,6 +34,9 @@ from __future__ import annotations
 
 import argparse
 import sys
+import json
+import re
+import time
 from collections import defaultdict
 from pathlib import Path
 
@@ -78,6 +81,37 @@ LEGS       = ["long", "short"]
 
 # Weight cap per stock — taken from config MVO_CONFIG
 MAX_WEIGHT = config.MVO_CONFIG.get("max_weight", 0.05)
+
+# #region agent log
+DEBUG_LOG_PATH = Path("/Users/polina/alberblanc/.cursor/debug-0b625c.log")
+def _debug_log(message: str, data: dict, hypothesis_id: str = "", run_id: str = "pre-fix"):
+    try:
+        payload = {
+            "sessionId": "0b625c",
+            "runId": run_id,
+            "hypothesisId": hypothesis_id,
+            "id": f"log_{int(time.time()*1000)}",
+            "timestamp": int(time.time() * 1000),
+            "location": "tsfm_stock_weights.py",
+            "message": message,
+            "data": data,
+        }
+        with open(DEBUG_LOG_PATH, "a") as f:
+            f.write(json.dumps(payload) + "\n")
+    except Exception:
+        pass
+
+_UNNAMED_RE = re.compile(r"^\s*Unnamed\s*:\s*\d+\s*$", re.IGNORECASE)
+def _is_bad_ticker(t: str) -> bool:
+    s = str(t).strip()
+    if not s:
+        return True
+    if s.lower() in {"nan", "none"}:
+        return True
+    if _UNNAMED_RE.match(s):
+        return True
+    return False
+# #endregion
 
 
 # ---------------------------------------------------------------------------
@@ -139,6 +173,13 @@ def load_positions(
     path = FACTORS_DIR / filename
     if not path.exists():
         print(f"  Warning: positions file not found for {factor}: {path}")
+        # #region agent log
+        _debug_log(
+            "load_positions: positions file missing",
+            {"factor": factor, "filename": filename, "path": str(path)},
+            hypothesis_id="H_missing_positions_file",
+        )
+        # #endregion
         return {r: {l: [] for l in LEGS} for r in REGIONS}
 
     result: dict[str, dict[str, list[str]]] = {
@@ -151,9 +192,23 @@ def load_positions(
             try:
                 df = pd.read_excel(path, sheet_name=sheet)
             except Exception:
+                # #region agent log
+                _debug_log(
+                    "load_positions: missing sheet or read error",
+                    {"factor": factor, "file": str(path), "sheet": sheet},
+                    hypothesis_id="H_missing_sheet",
+                )
+                # #endregion
                 continue  # sheet may not exist for this factor/region
 
             if df.empty:
+                # #region agent log
+                _debug_log(
+                    "load_positions: sheet empty",
+                    {"factor": factor, "file": str(path), "sheet": sheet},
+                    hypothesis_id="H_empty_sheet",
+                )
+                # #endregion
                 continue
 
             df.columns = [c.strip() for c in df.columns]
@@ -163,20 +218,88 @@ def load_positions(
 
             df["Date"] = pd.to_datetime(df["Date"])
 
+            # #region agent log
+            if factor == "QLT":
+                try:
+                    _debug_log(
+                        "load_positions: QLT date inventory",
+                        {
+                            "factor": factor,
+                            "file": str(path),
+                            "sheet": sheet,
+                            "date_arg": (str(date) if date is not None else None),
+                            "min_date": (str(df["Date"].min()) if not df["Date"].empty else None),
+                            "max_date": (str(df["Date"].max()) if not df["Date"].empty else None),
+                            "n_rows": int(len(df)),
+                            "n_unique_dates": int(df["Date"].nunique(dropna=True)),
+                        },
+                        hypothesis_id="H_qlt_date_mismatch",
+                    )
+                except Exception:
+                    pass
+            # #endregion
+
             if date is None:
                 use_date = df["Date"].max()
             else:
                 available = df["Date"][df["Date"] <= date]
                 if available.empty:
+                    # #region agent log
+                    if factor == "QLT":
+                        _debug_log(
+                            "load_positions: QLT no available dates <= date_arg",
+                            {
+                                "factor": factor,
+                                "file": str(path),
+                                "sheet": sheet,
+                                "date_arg": str(date),
+                                "min_date": (str(df["Date"].min()) if not df["Date"].empty else None),
+                            },
+                            hypothesis_id="H_qlt_date_mismatch",
+                        )
+                    # #endregion
                     continue
                 use_date = available.max()
 
-            tickers = (
+            tickers_raw = (
                 df[df["Date"] == use_date]["Ticker"]
                 .dropna()
+                .astype(str)
                 .str.strip()
                 .tolist()
             )
+            tickers = [t for t in tickers_raw if not _is_bad_ticker(t)]
+            # #region agent log
+            if factor == "QLT":
+                _debug_log(
+                    "load_positions: QLT tickers loaded",
+                    {
+                        "factor": factor,
+                        "file": str(path),
+                        "sheet": sheet,
+                        "use_date": str(use_date),
+                        "raw_count": int(len(tickers_raw)),
+                        "kept_count": int(len(tickers)),
+                        "raw_sample": tickers_raw[:10],
+                    },
+                    hypothesis_id="H_qlt_empty_after_filter",
+                )
+            bad = [t for t in tickers_raw if _is_bad_ticker(t)]
+            if bad:
+                _debug_log(
+                    "load_positions: bad tickers filtered out",
+                    {
+                        "factor": factor,
+                        "file": str(path),
+                        "sheet": sheet,
+                        "use_date": str(use_date),
+                        "bad_count": len(bad),
+                        "kept_count": len(tickers),
+                        "bad_sample": bad[:20],
+                    },
+                    hypothesis_id="H_src_positions",
+                )
+            # #endregion
             result[region][leg] = tickers
 
     return result
@@ -260,8 +383,8 @@ def split_and_normalize(
                 )
             continue
 
-        longs  = {t: w for t, w in region_raw.items() if w > 0}
-        shorts = {t: w for t, w in region_raw.items() if w < 0}
+        longs  = {t: w for t, w in region_raw.items() if w > 0 and not _is_bad_ticker(t)}
+        shorts = {t: w for t, w in region_raw.items() if w < 0 and not _is_bad_ticker(t)}
 
         def normalize_and_cap(
             pool: dict[str, float], target_sum: float
@@ -319,6 +442,14 @@ def run(date: pd.Timestamp | None = None) -> dict[str, pd.DataFrame]:
     print("TSFM STOCK WEIGHTS")
     print("=" * 60)
 
+    # #region agent log
+    _debug_log(
+        "run: TSFM started",
+        {"date_arg": (str(date) if date is not None else None)},
+        hypothesis_id="H_tsfm_not_running",
+    )
+    # #endregion
+
     # Load TSFM factor weights
     print("\n[1/4] Loading TSFM factor weights...")
     tsfm_weights = load_tsfm_weights(date)
@@ -363,6 +494,18 @@ def run(date: pd.Timestamp | None = None) -> dict[str, pd.DataFrame]:
     # Save output
     HRP_DIR.mkdir(parents=True, exist_ok=True)
     sheet_order = ["long_eu", "short_eu", "long_us", "short_us"]
+    # #region agent log
+    for sheet_name in sheet_order:
+        df = sheets.get(sheet_name, pd.DataFrame(columns=["Ticker", "Weight"]))
+        if not df.empty and "Ticker" in df.columns:
+            bad = [t for t in df["Ticker"].astype(str).tolist() if _is_bad_ticker(t)]
+            if bad:
+                _debug_log(
+                    "run: bad tickers present before write",
+                    {"sheet": sheet_name, "bad_count": len(bad), "bad_sample": bad[:20]},
+                    hypothesis_id="H_before_write",
+                )
+    # #endregion
     with pd.ExcelWriter(OUT_FILE, engine="openpyxl") as writer:
         for sheet_name in sheet_order:
             df = sheets.get(sheet_name, pd.DataFrame(columns=["Ticker", "Weight"]))

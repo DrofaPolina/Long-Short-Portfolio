@@ -17,8 +17,13 @@ import sys
 import os
 from pathlib import Path
 
-# Add parent directory to path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Ensure imports work whether run via run_all.py or standalone.
+# - run_all.py already inserts ROOT and ROOT/src into sys.path
+# - running this module directly (or via `python -c ...`) needs src on sys.path
+_SRC_DIR = Path(__file__).resolve().parent
+_ROOT_DIR = _SRC_DIR.parent
+sys.path.insert(0, str(_SRC_DIR))
+sys.path.insert(0, str(_ROOT_DIR))
 
 import config
 
@@ -32,6 +37,28 @@ from data_loader import (
     load_stock_returns_eu,
 )
 from factor_positions_io import save_positions_excel
+
+# #region agent log
+import json
+import time
+DEBUG_LOG_PATH = Path("/Users/polina/alberblanc/.cursor/debug-0b625c.log")
+def _debug_log(message: str, data: dict, hypothesis_id: str = ""):
+    try:
+        payload = {
+            "sessionId": "0b625c",
+            "runId": "post-fix",
+            "hypothesisId": hypothesis_id,
+            "id": f"log_{int(time.time()*1000)}",
+            "timestamp": int(time.time() * 1000),
+            "location": "quality.py",
+            "message": message,
+            "data": data,
+        }
+        with open(DEBUG_LOG_PATH, "a") as f:
+            f.write(json.dumps(payload) + "\n")
+    except Exception:
+        pass
+# #endregion
 
 
 def _z_scores_cross_sectional(df):
@@ -252,6 +279,14 @@ def calculate_quality_factor(save_outputs=True, output_dir=None):
     print("=" * 60)
     print("QUALITY FACTOR CALCULATION")
     print("=" * 60)
+
+    # #region agent log
+    _debug_log(
+        "quality: entered calculate_quality_factor",
+        {"output_dir": str(output_dir), "save_outputs": bool(save_outputs)},
+        hypothesis_id="H_log_missing",
+    )
+    # #endregion
     
     print("\n[1/4] Loading financial data...")
     roe_us = load_financial_data_us('roe')
@@ -262,6 +297,29 @@ def calculate_quality_factor(save_outputs=True, output_dir=None):
     debt_eq_eu = load_financial_data_eu('debt_eq')
     roe_quarterly_us = load_financial_data_us('roe_quarterly')
     roe_quarterly_eu = load_financial_data_eu('roe_quarterly')
+
+    # #region agent log
+    def _col_stats(df):
+        if df is None:
+            return {"shape": None, "unnamed_count": None}
+        cols = [str(c).strip() for c in df.columns.astype(str).tolist()]
+        unnamed = [c for c in cols if c.lower().startswith("unnamed:")]
+        return {"shape": list(df.shape), "unnamed_count": int(len(unnamed)), "unnamed_sample": unnamed[:10]}
+    _debug_log(
+        "quality: loaded financial data column stats",
+        {
+            "roe_us": _col_stats(roe_us),
+            "roe_eu": _col_stats(roe_eu),
+            "roe_growth_us": _col_stats(roe_growth_us),
+            "roe_growth_eu": _col_stats(roe_growth_eu),
+            "debt_eq_us": _col_stats(debt_eq_us),
+            "debt_eq_eu": _col_stats(debt_eq_eu),
+            "roe_quarterly_us": _col_stats(roe_quarterly_us),
+            "roe_quarterly_eu": _col_stats(roe_quarterly_eu),
+        },
+        hypothesis_id="H_qlt_unnamed_source",
+    )
+    # #endregion
     
     print("\n[2/4] Calculating regional quality scores...")
     quality_scores_us = calculate_quality_score_region(
@@ -338,6 +396,38 @@ def calculate_quality_factor(save_outputs=True, output_dir=None):
 
     long_us, short_us = _positions_jan_jul_from_positions(pos_us)
     long_eu, short_eu = _positions_jan_jul_from_positions(pos_eu)
+
+    # #region agent log
+    try:
+        def _unnamed_cols(df):
+            if df is None or df.empty:
+                return []
+            return [c for c in df.columns.astype(str).tolist() if str(c).strip().lower().startswith("unnamed:")]
+        unnamed_us = _unnamed_cols(quality_scores_us)
+        unnamed_eu = _unnamed_cols(quality_scores_eu)
+        _debug_log(
+            "quality: positions about to be written",
+            {
+                "scores_us_shape": (list(quality_scores_us.shape) if quality_scores_us is not None else None),
+                "scores_eu_shape": (list(quality_scores_eu.shape) if quality_scores_eu is not None else None),
+                "unnamed_us_count": len(unnamed_us),
+                "unnamed_eu_count": len(unnamed_eu),
+                "unnamed_us_sample": unnamed_us[:10],
+                "unnamed_eu_sample": unnamed_eu[:10],
+                "long_us_sample": (long_us[-1][1][:10] if long_us else []),
+                "short_us_sample": (short_us[-1][1][:10] if short_us else []),
+                "long_eu_sample": (long_eu[-1][1][:10] if long_eu else []),
+                "short_eu_sample": (short_eu[-1][1][:10] if short_eu else []),
+                "long_us_last_n": (len(long_us[-1][1]) if long_us else 0),
+                "short_us_last_n": (len(short_us[-1][1]) if short_us else 0),
+                "long_eu_last_n": (len(long_eu[-1][1]) if long_eu else 0),
+                "short_eu_last_n": (len(short_eu[-1][1]) if short_eu else 0),
+            },
+            hypothesis_id="H_qlt_unnamed_source",
+        )
+    except Exception:
+        pass
+    # #endregion
     
     # Save outputs if requested
     if save_outputs:

@@ -99,7 +99,12 @@ def load_financial_data_us(metric):
     # Load specific sheet
     df = pd.read_excel(output, sheet_name=sheet_mapping[metric], index_col=0)
     df.index = pd.to_datetime(df.index, errors='coerce')
-    
+
+    # Clean common Excel artifacts: "Unnamed:*" columns and fully-empty columns
+    df.columns = [str(c).strip() for c in df.columns]
+    df = df.loc[:, ~pd.Series(df.columns).str.match(r"^Unnamed\s*:\s*\d+$", case=False).to_numpy()]
+    df = df.dropna(axis=1, how="all")
+
     return df
 
 
@@ -134,6 +139,12 @@ def load_financial_data_eu(metric):
     # Load specific sheet
     df = pd.read_excel(output, sheet_name=sheet_mapping[metric], index_col=0)
     df.index = pd.to_datetime(df.index, errors='coerce')
+
+    # Clean common Excel artifacts: "Unnamed:*" columns and fully-empty columns
+    df.columns = [str(c).strip() for c in df.columns]
+    df = df.loc[:, ~pd.Series(df.columns).str.match(r"^Unnamed\s*:\s*\d+$", case=False).to_numpy()]
+    df = df.dropna(axis=1, how="all")
+
     return df
 
 

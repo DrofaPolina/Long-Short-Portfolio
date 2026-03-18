@@ -20,8 +20,15 @@ import sys
 import os
 from pathlib import Path
 
+from factor_positions_io import save_positions_excel
+
 # Default: write to project root outputs/factors (same regardless of cwd)
-_DEFAULT_FACTOR_OUTPUT = str(Path(__file__).resolve().parent.parent / "outputs" / "factors")
+_SCRIPT_DIR = Path(__file__).resolve().parent
+_PROJECT_ROOT = _SCRIPT_DIR.parent
+_DEFAULT_FACTOR_OUTPUT = str(_PROJECT_ROOT / "outputs" / "factors")
+
+# Tickers.xlsx defines the investable universe for beta position files (yield is macro, no stock picks)
+_TICKERS_PATH = _PROJECT_ROOT / "data" / "Tickers.xlsx"
 
 
 def nelson_siegel_design_matrix(t, lb=1.5):
@@ -126,6 +133,43 @@ def standardize_factors(factors_df):
         pd.DataFrame - Standardized factors
     """
     return (factors_df - factors_df.mean()) / factors_df.std()
+
+
+def _load_tickers_universe():
+    """
+    Load long_us, short_us, long_eu, short_eu ticker lists from data/Tickers.xlsx.
+    Returns dict with keys long_us, short_us, long_eu, short_eu, each a list of ticker strings.
+    Yield factors are macro (no stock picks); we use the same universe as other factors.
+    """
+    if not _TICKERS_PATH.exists():
+        return None
+    sheet_order = ["long_us", "short_us", "long_eu", "short_eu"]
+    out = {s: [] for s in sheet_order}
+    for sheet in sheet_order:
+        try:
+            df = pd.read_excel(_TICKERS_PATH, sheet_name=sheet, header=0)
+        except Exception:
+            continue
+        if df.empty:
+            continue
+        col = df.columns[0] if len(df.columns) else None
+        for c in df.columns:
+            if str(c).strip().upper() == "TICKER":
+                col = c
+                break
+        if col is None:
+            continue
+        tickers = (
+            df[col].astype(str).str.strip().replace("", pd.NA).dropna().unique().tolist()
+        )
+        # Drop bad tickers (Unnamed, nan)
+        out[sheet] = [
+            t
+            for t in tickers
+            if t
+            and not (str(t).startswith("Unnamed") or "nan" in str(t).lower())
+        ]
+    return out
 
 
 def load_yield_curves():
@@ -236,6 +280,32 @@ def calculate_yield_factors_monthly(save_outputs=True, output_dir=None):
             # Also save simple version
             simple_df = pd.DataFrame({f'BETA{beta_num}': combined[f'BETA{beta_num}']})
             simple_df.to_excel(f'{output_dir}/beta{beta_num}_returns.xlsx')
+
+        # Yield is a macro factor (no stock picks). Create beta0/1/2_positions.xlsx using
+        # the same universe as other factors (data/Tickers.xlsx) so TSFM can apply beta weights.
+        universe = _load_tickers_universe()
+        if universe is not None:
+            # Rebalance dates: one month-end per Jan/Jul in the yield factor index
+            jan_jul = combined.index[combined.index.month.isin([1, 7])]
+            rebalance_dates = sorted(
+                set(
+                    (pd.Timestamp(d).normalize() + pd.offsets.MonthEnd(0))
+                    for d in jan_jul
+                )
+            )
+            if rebalance_dates:
+                long_us = [(d, universe["long_us"]) for d in rebalance_dates]
+                short_us = [(d, universe["short_us"]) for d in rebalance_dates]
+                long_eu = [(d, universe["long_eu"]) for d in rebalance_dates]
+                short_eu = [(d, universe["short_eu"]) for d in rebalance_dates]
+                for beta_num in [0, 1, 2]:
+                    out_path = Path(output_dir) / f"beta{beta_num}_positions.xlsx"
+                    save_positions_excel(long_us, short_us, long_eu, short_eu, out_path)
+                    print(f"  ✓ Saved beta{beta_num}_positions.xlsx")
+            else:
+                print("  ⚠ No Jan/Jul dates in yield index; skipping beta *_positions.xlsx")
+        else:
+            print(f"  ⚠ Tickers.xlsx not found at {_TICKERS_PATH}; skipping beta *_positions.xlsx")
         
         # Save all factors together
         combined.to_excel(f'{output_dir}/yield_factors_all.xlsx')
@@ -264,9 +334,9 @@ if __name__ == '__main__':
     
     print("\n✓ Yield factors ready!")
     print("\nOutput files:")
-    print("  - outputs/factors/beta0_regional.xlsx (Level)")
-    print("  - outputs/factors/beta1_regional.xlsx (Slope)")
-    print("  - outputs/factors/beta2_regional.xlsx (Curvature)")
+    print("  - outputs/factors/beta0_regional.xlsx, beta0_returns.xlsx, beta0_positions.xlsx (Level)")
+    print("  - outputs/factors/beta1_regional.xlsx, beta1_returns.xlsx, beta1_positions.xlsx (Slope)")
+    print("  - outputs/factors/beta2_regional.xlsx, beta2_returns.xlsx, beta2_positions.xlsx (Curvature)")
     print("  - outputs/factors/yield_factors_all.xlsx (Combined)")
     
     print("\nInterpretation:")

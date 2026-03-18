@@ -2,7 +2,7 @@
 Check that pooling tickers from *_positions.xlsx yields the same sets as Tickers.xlsx.
 
 Run after run_all.py has produced:
-  - outputs/factors/{value,momentum,quality,liquidity,lowvol}_positions.xlsx
+  - outputs/factors/{value,momentum,quality,liquidity,lowvol,beta0,beta1,beta2}_positions.xlsx
   - data/Tickers.xlsx
 
 Logic:
@@ -40,13 +40,16 @@ def _debug_log(message: str, data: dict, hypothesis_id: str = ""):
 FACTORS_DIR = config.get_output_path("factors")
 TICKERS_PATH = config.get_data_path("Tickers.xlsx")
 
-# Same five factors that run_all pools in _pool_and_write_tickers
+# Factors that produce *_positions.xlsx (run_all order; yield adds beta0/1/2)
 POSITION_FILES = [
     "value_positions.xlsx",
     "momentum_positions.xlsx",
     "quality_positions.xlsx",
     "liquidity_positions.xlsx",
     "lowvol_positions.xlsx",
+    "beta0_positions.xlsx",
+    "beta1_positions.xlsx",
+    "beta2_positions.xlsx",
 ]
 
 SHEET_ORDER = ["long_us", "short_us", "long_eu", "short_eu"]
