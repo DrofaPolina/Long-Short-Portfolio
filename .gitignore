@@ -40,3 +40,4 @@ REDUNDANT_OR_STANDALONE.md
 
 # Conda / env (local)
 .conda/
+*code-workspace
