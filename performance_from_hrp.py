@@ -3,18 +3,19 @@ Performance from weight files and Performance workbook.
 
 Reads:
   - Weights: Excel with sheets long_eu, short_eu, long_us, short_us (Ticker, Weight)
-    Two inputs by default: hrp_weights.xlsx and tsfm_stock_weights.xlsx
+    Default inputs: hrp_weights.xlsx, tsfm_stock_weights.xlsx, equal_stock_weights.xlsx
   - Prices: data/Performance_SPRING_2026.xlsx (US PORTFOLIO, EU PORTFOLIO; optional EURUSD)
 
-Writes (for each weight file):
-  - outputs/portfolio_combined/<output_name>.xlsx
-    - EU PORTFOLIO: long leg, long leg change, short leg, short leg change, total
-    - US PORTFOLIO: same
-    - Total: EU total, US total, US total in EUR, total sum in EUR
+Writes (default):
+  - outputs/portfolio_combined/performance_from_all.xlsx
+    - Sheet PERFORMANCE: HRP | TSFM | EQUAL (each: EU, US, Total)
+    - Weight sheets HRP_W_*, TSFM_W_*, EQUAL_W_*
+
+Optional (--weights): a single custom output workbook (EU/US/Total sheets).
 
 Usage:
-  python performance_from_hrp.py              # run both HRP and TSFM
-  python performance_from_hrp.py --weights hrp_weights.xlsx --output performance_from_hrp.xlsx  # one only
+  python performance_from_hrp.py
+  python performance_from_hrp.py --weights path/to/weights.xlsx --output path/to/out.xlsx
 """
 from __future__ import annotations
 
@@ -22,6 +23,7 @@ import argparse
 import pandas as pd
 import numpy as np
 from pathlib import Path
+from openpyxl import load_workbook
 
 import config
 
@@ -30,11 +32,24 @@ WEIGHTS_DIR = config.get_output_path("hrp_weights")
 DATA_PATH = config.get_data_path("Performance_SPRING_2026.xlsx")
 OUT_DIR = config.get_output_path("portfolio_combined")
 
-# Two portfolios: (weights filename, output filename) — same format for both
-PORTFOLIO_CONFIGS = [
-    (WEIGHTS_DIR / "hrp_weights.xlsx", OUT_DIR / "performance_from_hrp.xlsx"),
-    (WEIGHTS_DIR / "tsfm_stock_weights.xlsx", OUT_DIR / "performance_from_tsfm.xlsx"),
+# Weight files merged into performance_from_all.xlsx (order → columns left to right: HRP | TSFM | EQUAL).
+COMBINED_WEIGHT_FILES = [
+    WEIGHTS_DIR / "hrp_weights.xlsx",
+    WEIGHTS_DIR / "tsfm_stock_weights.xlsx",
+    WEIGHTS_DIR / "equal_stock_weights.xlsx",
 ]
+
+
+def _portfolio_tag(weights_path: Path) -> str:
+    """Sheet prefix for combined workbook: HRP, TSFM, or EQUAL."""
+    name = weights_path.name.lower()
+    if "equal_stock" in name:
+        return "EQUAL"
+    if "tsfm" in name:
+        return "TSFM"
+    if "hrp" in name:
+        return "HRP"
+    return "HRP"
 
 # US DATA / EU DATA layout: tickers C4, prices C5, dates B5 (0-based: row 3, row 4, col 1, col 2+)
 DATA_TICKER_ROW = 3
@@ -145,7 +160,8 @@ def build_portfolio_sheet(
     short_leg = short_leg.reindex(long_leg.index).fillna(0.0)
     long_leg_change = long_leg.diff()
     short_leg_change = short_leg.diff()
-    total = long_leg_change + short_leg_change
+    # Total = long leg level + short leg level (not sum of daily deltas)
+    total = long_leg + short_leg
     out = pd.DataFrame({
         "long_leg": long_leg,
         "long_leg_change": long_leg_change,
@@ -154,6 +170,39 @@ def build_portfolio_sheet(
         "total": total,
     })
     return out
+
+
+def apply_portfolio_formulas(ws, header_row: int, start_col: int, n_rows: int) -> None:
+    """
+    Write Excel formulas for derived columns in one portfolio table block.
+    Columns (relative to start_col = Date column):
+      +1 long_leg, +2 long_leg_change, +3 short_leg, +4 short_leg_change, +5 total
+    total = long_leg + short_leg (levels), not long_leg_change + short_leg_change.
+    """
+    if n_rows <= 0:
+        return
+    # First data row (diff has no previous row for change columns)
+    first_data_row = header_row + 1
+    c_long = start_col + 1
+    c_long_chg = start_col + 2
+    c_short = start_col + 3
+    c_short_chg = start_col + 4
+    c_total = start_col + 5
+
+    def _total_formula(r: int) -> str:
+        cl = ws.cell(row=r, column=c_long).coordinate
+        cs = ws.cell(row=r, column=c_short).coordinate
+        return f"={cl}+{cs}"
+
+    ws.cell(row=first_data_row, column=c_long_chg, value="=NA()")
+    ws.cell(row=first_data_row, column=c_short_chg, value="=NA()")
+    ws.cell(row=first_data_row, column=c_total, value=_total_formula(first_data_row))
+
+    # Remaining rows: changes from diffs; total = long_leg + short_leg on each row
+    for r in range(first_data_row + 1, first_data_row + n_rows):
+        ws.cell(row=r, column=c_long_chg, value=f"={ws.cell(row=r, column=c_long).coordinate}-{ws.cell(row=r-1, column=c_long).coordinate}")
+        ws.cell(row=r, column=c_short_chg, value=f"={ws.cell(row=r, column=c_short).coordinate}-{ws.cell(row=r-1, column=c_short).coordinate}")
+        ws.cell(row=r, column=c_total, value=_total_formula(r))
 
 
 def load_eurusd(path: Path) -> pd.Series | None:
@@ -183,6 +232,41 @@ def run_performance(weights_path: Path, out_path: Path) -> bool:
         print(f"Data file not found: {DATA_PATH}")
         return False
 
+    weights, eu_sheet, us_sheet, total_sheet = compute_performance_frames(weights_path)
+    if weights is None:
+        return False
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with pd.ExcelWriter(out_path, engine="openpyxl") as w:
+        eu_sheet.index.name = "Date"
+        us_sheet.index.name = "Date"
+        total_sheet.index.name = "Date"
+        eu_sheet.to_excel(w, sheet_name="EU PORTFOLIO")
+        us_sheet.to_excel(w, sheet_name="US PORTFOLIO")
+        total_sheet.to_excel(w, sheet_name="Total")
+    # Replace derived columns with formulas in portfolio sheets
+    wb = load_workbook(out_path)
+    apply_portfolio_formulas(wb["EU PORTFOLIO"], header_row=1, start_col=1, n_rows=len(eu_sheet))
+    apply_portfolio_formulas(wb["US PORTFOLIO"], header_row=1, start_col=1, n_rows=len(us_sheet))
+    wb.save(out_path)
+    print(f"Wrote {out_path}")
+    return True
+
+
+def compute_performance_frames(
+    weights_path: Path,
+) -> tuple[dict[str, pd.DataFrame] | None, pd.DataFrame | None, pd.DataFrame | None, pd.DataFrame | None]:
+    """
+    Compute weights and output DataFrames for one weights file.
+    Returns (weights, eu_sheet, us_sheet, total_sheet), or (None, None, None, None) if skipped.
+    """
+    if not weights_path.exists():
+        print(f"Weights not found: {weights_path}")
+        return None, None, None, None
+    if not DATA_PATH.exists():
+        print(f"Data file not found: {DATA_PATH}")
+        return None, None, None, None
+
     weights = load_weights(weights_path)
     long_prices_eu = load_prices_from_portfolio_sheet(DATA_PATH, "EU PORTFOLIO")
     short_prices_eu = load_prices_from_data_sheet(DATA_PATH, "EU DATA")
@@ -206,17 +290,129 @@ def run_performance(weights_path: Path, out_path: Path) -> bool:
         "us_total_eur": us_total_eur,
         "total_eur": eu_sheet["total"] + us_total_eur,
     })
+    return weights, eu_sheet, us_sheet, total_sheet
 
+
+# Single worksheet in the combined workbook: HRP | TSFM | EQUAL (EU, US, Total per method).
+COMBINED_PERF_SHEET = "PERFORMANCE"
+
+
+def run_performance_combined(out_path: Path) -> bool:
+    """
+    Build one Excel file with HRP, TSFM, and EQUAL on the same PERFORMANCE sheet
+    (three horizontal blocks: each block = EU | US | Total), plus weight sheets per method.
+    """
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    with pd.ExcelWriter(out_path, engine="openpyxl") as w:
+
+    results: list[
+        tuple[str, dict[str, pd.DataFrame], pd.DataFrame, pd.DataFrame, pd.DataFrame]
+    ] = []
+    for weights_path in COMBINED_WEIGHT_FILES:
+        tag = _portfolio_tag(weights_path)
+        weights, eu_sheet, us_sheet, total_sheet = compute_performance_frames(weights_path)
+        if weights is None:
+            continue
         eu_sheet.index.name = "Date"
         us_sheet.index.name = "Date"
         total_sheet.index.name = "Date"
-        eu_sheet.to_excel(w, sheet_name="EU PORTFOLIO")
-        us_sheet.to_excel(w, sheet_name="US PORTFOLIO")
-        total_sheet.to_excel(w, sheet_name="Total")
-    print(f"Wrote {out_path}")
-    return True
+        results.append((tag, weights, eu_sheet, us_sheet, total_sheet))
+
+    if not results:
+        return False
+
+    gap = 2
+    section_gap = 3  # blank columns between HRP / TSFM / EQUAL blocks
+    # Row layout: model title, section label row, then table headers + data (same for all blocks).
+    model_row = 0
+    section_label_row = 1
+    table_header_row = 2  # 0-based; Excel row 3 = column headers of EU/US/Total tables
+    # 1-based Excel row of portfolio table headers (Date, long_leg, ...):
+    excel_header_row_1based = table_header_row + 1
+
+    eu0, us0, tot0 = results[0][2], results[0][3], results[0][4]
+    eu_width = eu0.shape[1] + 1
+    us_width = us0.shape[1] + 1
+    total_width = tot0.shape[1] + 1
+    block_width = eu_width + gap + us_width + gap + total_width
+
+    wrote_any = False
+    with pd.ExcelWriter(out_path, engine="openpyxl") as w:
+        formula_blocks: list[tuple[str, int, int, int]] = []
+        current_col = 0
+
+        for tag, weights, eu_sheet, us_sheet, total_sheet in results:
+            wrote_any = True
+            start_eu = current_col
+            start_us = start_eu + eu_width + gap
+            start_total = start_us + us_width + gap
+
+            pd.DataFrame([[tag]]).to_excel(
+                w,
+                sheet_name=COMBINED_PERF_SHEET,
+                index=False,
+                header=False,
+                startrow=model_row,
+                startcol=start_eu,
+            )
+            pd.DataFrame({"Section": ["EU PORTFOLIO"]}).to_excel(
+                w,
+                sheet_name=COMBINED_PERF_SHEET,
+                index=False,
+                header=False,
+                startrow=section_label_row,
+                startcol=start_eu,
+            )
+            eu_sheet.to_excel(
+                w, sheet_name=COMBINED_PERF_SHEET, startrow=table_header_row, startcol=start_eu
+            )
+            formula_blocks.append(
+                (COMBINED_PERF_SHEET, excel_header_row_1based, start_eu + 1, len(eu_sheet))
+            )
+
+            pd.DataFrame({"Section": ["US PORTFOLIO"]}).to_excel(
+                w,
+                sheet_name=COMBINED_PERF_SHEET,
+                index=False,
+                header=False,
+                startrow=section_label_row,
+                startcol=start_us,
+            )
+            us_sheet.to_excel(
+                w, sheet_name=COMBINED_PERF_SHEET, startrow=table_header_row, startcol=start_us
+            )
+            formula_blocks.append(
+                (COMBINED_PERF_SHEET, excel_header_row_1based, start_us + 1, len(us_sheet))
+            )
+
+            pd.DataFrame({"Section": ["Total"]}).to_excel(
+                w,
+                sheet_name=COMBINED_PERF_SHEET,
+                index=False,
+                header=False,
+                startrow=section_label_row,
+                startcol=start_total,
+            )
+            total_sheet.to_excel(
+                w, sheet_name=COMBINED_PERF_SHEET, startrow=table_header_row, startcol=start_total
+            )
+            formula_blocks.append(
+                (COMBINED_PERF_SHEET, excel_header_row_1based, start_total + 1, len(total_sheet))
+            )
+
+            weights["long_eu"].to_excel(w, sheet_name=f"{tag}_W_long_eu", index=False)
+            weights["short_eu"].to_excel(w, sheet_name=f"{tag}_W_short_eu", index=False)
+            weights["long_us"].to_excel(w, sheet_name=f"{tag}_W_long_us", index=False)
+            weights["short_us"].to_excel(w, sheet_name=f"{tag}_W_short_us", index=False)
+
+            current_col += block_width + section_gap
+
+    wb = load_workbook(out_path)
+    for sheet_name, header_row, start_col, n_rows in formula_blocks:
+        apply_portfolio_formulas(wb[sheet_name], header_row=header_row, start_col=start_col, n_rows=n_rows)
+    wb.save(out_path)
+    if wrote_any:
+        print(f"Wrote combined workbook: {out_path} (sheet {COMBINED_PERF_SHEET}: HRP | TSFM | EQUAL)")
+    return wrote_any
 
 
 def main():
@@ -230,8 +426,8 @@ def main():
         run_performance(Path(args.weights), Path(out_path))
         return
 
-    for weights_path, out_path in PORTFOLIO_CONFIGS:
-        run_performance(weights_path, out_path)
+    combined_out = OUT_DIR / "performance_from_all.xlsx"
+    run_performance_combined(combined_out)
 
 
 if __name__ == "__main__":

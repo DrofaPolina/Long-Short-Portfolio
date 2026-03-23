@@ -76,6 +76,15 @@ def _get_active_position_files() -> dict[str, str]:
         if factor in _FACTOR_STEMS
     }
 
+
+def get_active_factors_for_stock_weights() -> list[str]:
+    """
+    Factors from config (ACTIVE_FACTORS) that have a *_positions.xlsx stem, in config order.
+    TSFM and equal-factor stock weights both use this set only (not extra factors from TSFM file).
+    """
+    files = _get_active_position_files()
+    return [f for f in config.get_active_factors() if f in files]
+
 REGIONS    = ["us", "eu"]
 LEGS       = ["long", "short"]
 
@@ -456,25 +465,26 @@ def run(date: pd.Timestamp | None = None) -> dict[str, pd.DataFrame]:
     for f, w in tsfm_weights.items():
         print(f"  {f:6s}: {w:+.4f}")
 
-    # Load stock positions for each factor
+    # Load stock positions for each factor (config-driven only; ignore extra factors in TSFM file)
     print("\n[2/4] Loading stock positions...")
     active_position_files = _get_active_position_files()
+    active_factors = get_active_factors_for_stock_weights()
     all_positions: dict[str, dict[str, dict[str, list[str]]]] = {}
-    for factor in tsfm_weights:
-        if factor not in active_position_files:
-            print(f"  Warning: no position file configured for {factor} (not in ACTIVE_FACTORS or no stem), skipping")
-            continue
+    tsfm_weights_use: dict[str, float] = {}
+    for factor in active_factors:
         filename = active_position_files[factor]
+        tsfm_w = float(tsfm_weights.get(factor, 0.0))
+        tsfm_weights_use[factor] = tsfm_w
         positions = load_positions(factor, filename, date)
         all_positions[factor] = positions
         for region in REGIONS:
             for leg in LEGS:
                 n = len(positions[region][leg])
-                print(f"  {factor} {leg}_{region}: {n} stocks")
+                print(f"  {factor} {leg}_{region}: {n} stocks (TSFM weight {tsfm_w:+.4f})")
 
     # Compute raw stock weights
     print("\n[3/4] Computing stock weights...")
-    raw = compute_stock_weights(tsfm_weights, all_positions)
+    raw = compute_stock_weights(tsfm_weights_use, all_positions)
 
     total_stocks = sum(len(v) for v in raw.values())
     print(f"  {total_stocks} unique stocks across all regions")

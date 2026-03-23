@@ -251,7 +251,14 @@ def main():
     print(f"\nBest Sharpe: {best} ({perf.loc[best, 'Sharpe']:.3f})")
     print(f"\nResults: {out_port}/")
 
-    # Final performance from HRP weights + Performance workbook
+    # Equal (1/K) factor → stock weights (same format as TSFM; needs *_positions.xlsx)
+    try:
+        from equal_stock_weights import run as run_equal_stock_weights
+        run_equal_stock_weights()
+    except Exception as e:
+        print(f"\n(Skip equal_stock_weights: {e})")
+
+    # Final performance from HRP + TSFM + equal weight files + Performance workbook
     try:
         from performance_from_hrp import main as run_performance_from_hrp
         perf_path = config.get_data_path("Performance_SPRING_2026.xlsx")

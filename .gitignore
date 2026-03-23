@@ -24,7 +24,7 @@ build/
 DATA/
 data/*
 !data/Tickers.xlsx
-!data/Tickers_HRP.xlsx
+# !data/Tickers_HRP.xlsx
 *.zip
 temp/
 

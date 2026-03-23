@@ -1,6 +1,6 @@
 # Minerva Code – Factor portfolio pipeline
 
-Multi-factor pipeline (Value, Momentum, Liquidity, Quality, Yield, Low Vol) with two weighting schemes: **HRP** (stock-level) and **Factor momentum / TSFM** (factor-level then stock-level). Outputs feed into performance workbooks.
+Multi-factor pipeline (Value, Momentum, Liquidity, Quality, Yield, Low Vol) with three stock-level weighting schemes: **HRP** (stock-level), **TSFM** (factor momentum then equal weight within factor legs), and **equal factor weights** (1/K per active factor, same within-leg logic as TSFM). Outputs feed into performance workbooks.
 
 ---
 
@@ -65,6 +65,16 @@ python tsfm_stock_weights.py
 - **factor_momentum.py** → `outputs/hrp_weights/factor_momentum_weights.xlsx` (factor weights from time-series momentum).
 - **tsfm_stock_weights.py** → `outputs/hrp_weights/tsfm_stock_weights.xlsx` (stock-level weights using TSFM factor weights and factor positions).
 
+### 3b. Equal factor weights (1/K) — same sheet format as TSFM
+
+Does **not** require `factor_momentum_weights.xlsx`. Uses only `config.ACTIVE_FACTORS` (factors with a `*_positions.xlsx` stem) and assigns **1/K** to each factor; within each factor, stocks are equal-weighted on the long and short legs (same pipeline as TSFM).
+
+```bash
+python equal_stock_weights.py
+```
+
+- **Output:** `outputs/hrp_weights/equal_stock_weights.xlsx` (same four sheets as `hrp_weights.xlsx` / `tsfm_stock_weights.xlsx`).
+
 ### 4. Performance from weight files
 
 Requires **`data/Performance_SPRING_2026.xlsx`** (see [Data files](#data-files-local-not-from-remote)).
@@ -73,8 +83,8 @@ Requires **`data/Performance_SPRING_2026.xlsx`** (see [Data files](#data-files-l
 python performance_from_hrp.py
 ```
 
-- Reads `hrp_weights.xlsx` and `tsfm_stock_weights.xlsx`, plus `data/Performance_SPRING_2026.xlsx`.
-- **Output:** `outputs/portfolio_combined/performance_from_hrp.xlsx` and `performance_from_tsfm.xlsx`.
+- Reads `hrp_weights.xlsx`, `tsfm_stock_weights.xlsx`, and `equal_stock_weights.xlsx` (skips any missing file), plus `data/Performance_SPRING_2026.xlsx`.
+- **Output:** **`performance_from_all.xlsx`** only — sheet **`PERFORMANCE`** has **HRP | TSFM | EQUAL** side by side (each method: EU | US | Total), plus weight sheets `HRP_W_*`, `TSFM_W_*`, `EQUAL_W_*`.
 
 ### Tickers
 
@@ -121,14 +131,15 @@ Minerva Code/
 ├── hrp_allocation.py   # HRP stock weights
 ├── factor_momentum.py  # TSFM factor weights
 ├── tsfm_stock_weights.py  # TSFM → stock weights (same format as hrp_weights)
-├── performance_from_hrp.py # Performance from hrp + tsfm weight files
+├── equal_stock_weights.py # Equal 1/K factor weights → stock weights (TSFM-style pipeline)
+├── performance_from_hrp.py # Performance from hrp + tsfm + equal weight files
 ├── copy_tickers_hrp_to_tickers.py  # One-time: Tickers_HRP → Tickers.xlsx
 ├── data/               # Tickers.xlsx, US_Returns, EU_Returns, Performance_*.xlsx, etc.
 ├── src/                 # Factor modules (value, momentum, quality, liquidity, yield, lowvol)
 └── outputs/
     ├── factors/         # Factor returns, *_positions.xlsx
-    ├── hrp_weights/     # hrp_weights.xlsx, factor_momentum_weights.xlsx, tsfm_stock_weights.xlsx
-    └── portfolio_combined/  # performance_from_hrp.xlsx, performance_from_tsfm.xlsx
+    ├── hrp_weights/     # hrp_weights.xlsx, factor_momentum_weights.xlsx, tsfm_stock_weights.xlsx, equal_stock_weights.xlsx
+    └── portfolio_combined/  # performance_from_all.xlsx (+ run_all factor_returns, etc.)
 ```
 
 - **data/** and **outputs/** are typically in `.gitignore`.
